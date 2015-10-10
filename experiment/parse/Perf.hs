@@ -6,14 +6,27 @@ import qualified OldParse  (readFields, ParseResult(..))
 import Distribution.Simple.Utils (fromUTF8)
 
 import qualified Parser
+import qualified Lexer
 
 import System.Environment
+import System.Exit
 import Control.Exception (evaluate)
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.ByteString.Char8 as BS
 
 main = do
-  [which, n, indexfile] <- getArgs
+  (which:args) <- getArgs
+  case which of
+    "run-arg"  -> let [file] = args
+                  in  do
+                        rfile <- LBS.readFile file
+                        case Parser.readFields (toStrict rfile) of
+                          Left msg -> print msg >> LBS.putStr rfile
+                          Right p -> print p
+                        exitSuccess
+    _ -> return ()
+  let [n, indexfile] = args
+
   cabalFiles <- IndexUtils.readPackageIndexFile indexfile
 
   case which of

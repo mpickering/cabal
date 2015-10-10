@@ -1,6 +1,6 @@
 {
 {-# LANGUAGE BangPatterns #-}
-module Lexer (ltest, lexToken, Token(..), LToken(..)
+module Lexer (ltest,ltestBS, lexToken, Token(..), LToken(..)
               ,bol_section, in_section, in_field_layout, in_field_braces
               ,mkLexState) where
 
@@ -45,6 +45,7 @@ $instr           = [$printable $space] # [\"]
 $instresc        = $printable
 
 @nl          = \n | \r\n | \r
+-- Contains at least one $alpha
 @name        = $nameextra* $namecore $nameextra*
 @string      = \" ( $instr | \\ $instresc )* \"
 @numlike     = $digit [$digit \.]*
@@ -161,7 +162,7 @@ lexToken = do
   st  <- getStartCode
   case alexScan inp st of
     AlexEOF -> return (L pos EOF)
-    AlexError inp' -> 
+    AlexError inp' ->
         let !len_bytes = B.length inp - B.length inp' in
             --FIXME: we want len_chars here really
             -- need to decode utf8 up to this point
@@ -195,6 +196,7 @@ checkPosition pos@(Position lineno colno) inp inp' len_chars = do
 lexAll :: Lex [LToken]
 lexAll = do
   t <- lexToken
+  traceShowM t
   case t of
     L _ EOF -> return [t]
     _       -> do ts <- lexAll
@@ -204,6 +206,9 @@ ltest :: Int -> String -> IO ()
 ltest code s =
   let xs = execLexer (setStartCode code >> lexAll) (B.Char8.pack s)
    in mapM_ print xs
+
+ltestBS :: B.ByteString  -> IO ()
+ltestBS s = ltest 0 (B.Char8.unpack s)
 
 
 mkLexState :: B.ByteString -> LexState
