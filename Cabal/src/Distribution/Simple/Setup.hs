@@ -1687,7 +1687,8 @@ instance Semigroup BuildFlags where
 
 data ReplOptions = ReplOptions {
     replOptionsFlags :: [String],
-    replOptionsNoLoad :: Flag Bool
+    replOptionsNoLoad :: Flag Bool,
+    replOptionsMultiFile :: Flag FilePath
   }
   deriving (Show, Generic, Typeable)
 
@@ -1696,7 +1697,7 @@ instance Structured ReplOptions
 
 
 instance Monoid ReplOptions where
-  mempty = ReplOptions mempty (Flag False)
+  mempty = ReplOptions mempty (Flag False) mempty
   mappend = (<>)
 
 instance Semigroup ReplOptions where
@@ -1806,6 +1807,10 @@ replOptions _ =
     "Disable loading of project modules at REPL startup."
     replOptionsNoLoad (\p flags -> flags { replOptionsNoLoad = p })
     trueArg
+  , option [] ["repl-multi-file"]
+    "Write repl options to this file rather than starting repl"
+    replOptionsMultiFile (\p flags -> flags { replOptionsMultiFile = p })
+    (reqArg "FILEPATH" (succeedReadE Flag) flagToList)
   , option [] ["repl-options"]
     "use this option for the repl"
     replOptionsFlags (\p flags -> flags { replOptionsFlags = p ++ replOptionsFlags flags })

@@ -312,9 +312,10 @@ replAction flags@NixStyleFlags { extraFlags = (replFlags, envFlags), ..} targetS
       -- Reject multiple targets, or at least targets in different
       -- components. It is ok to have two module/file targets in the
       -- same component, but not two that live in different components.
-      when (Set.size (distinctTargetComponents targets) > 1) $
-        reportTargetProblems verbosity
-          [multipleTargetsProblem targets]
+      --when (Set.size (distinctTargetComponents targets) > 1) $
+      --  reportTargetProblems verbosity
+      --    [multipleTargetsProblem targets]
+
 
       return targets
 

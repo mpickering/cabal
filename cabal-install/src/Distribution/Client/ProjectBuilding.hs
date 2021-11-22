@@ -84,7 +84,7 @@ import qualified Distribution.Simple.Setup as Cabal
 import           Distribution.Simple.Command (CommandUI)
 import qualified Distribution.Simple.Register as Cabal
 import           Distribution.Simple.LocalBuildInfo
-                   ( ComponentName(..), LibraryName(..) )
+                   ( ComponentName(..), LibraryName(..), withPrograms )
 import           Distribution.Simple.Compiler
                    ( Compiler, compilerId, PackageDB(..) )
 
@@ -100,11 +100,14 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS.Char8
 
 import Control.Exception (Handler (..), SomeAsyncException, assert, catches, handle)
-import System.Directory  (canonicalizePath, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, removeFile, renameDirectory)
+import System.Directory  (canonicalizePath, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, removeFile, renameDirectory, getCurrentDirectory)
 import System.FilePath   (dropDrive, makeRelative, normalise, takeDirectory, (<.>), (</>))
 import System.IO         (IOMode (AppendMode), Handle, withFile)
 
 import Distribution.Compat.Directory (listDirectory)
+import qualified Distribution.InstalledPackageInfo as IPI
+import Distribution.Types.ComponentLocalBuildInfo
+import Distribution.Simple.Program.GHC
 
 
 ------------------------------------------------------------------------------
@@ -392,7 +395,7 @@ packageFileMonitorKeyValues elab =
             elabBuildTargets   = [],
             elabTestTargets    = [],
             elabBenchTargets   = [],
-            elabReplTarget     = Nothing,
+            elabReplTarget     = [],
             elabHaddockTargets = [],
             elabBuildHaddocks  = False,
 
@@ -601,7 +604,7 @@ rebuildTargets verbosity
 
     -- Before traversing the install plan, pre-emptively find all packages that
     -- will need to be downloaded and start downloading them.
-    asyncDownloadPackages verbosity withRepoCtx
+    res <- asyncDownloadPackages verbosity withRepoCtx
                           installPlan pkgsBuildStatus $ \downloadMap ->
 
       -- For each package in the plan, in dependency order, but in parallel...
@@ -623,6 +626,16 @@ rebuildTargets verbosity
           sharedPackageConfig
           installPlan pkg
           pkgBuildStatus
+
+    (ghcProg, _) <- requireProgram verbosity ghcProgram progdb
+    let repl_targets = concatMap (InstallPlan.foldPlanPackage (const []) ((:[]) . elabUnitId)) (InstallPlan.toList installPlan)
+
+        mtargets = map (\f -> "/home/matt/simple-cabal-test/units/" ++ unUnitId f) repl_targets
+    filtered <- filterM doesFileExist mtargets
+    let all_unit_opts = map (\f -> ["-unit", "@" ++ f]) filtered
+    when (not (null all_unit_opts))
+         (runProgramInvocation verbosity $ programInvocation ghcProg $ join all_unit_opts)
+    return res
   where
     isParallelBuild = buildSettingNumJobs >= 2
     keepGoing       = buildSettingKeepGoing
@@ -1204,7 +1217,7 @@ hasValidHaddockTargets ElaboratedConfiguredPackage{..}
   where
     components :: [ComponentTarget]
     components = elabBuildTargets ++ elabTestTargets ++ elabBenchTargets
-              ++ maybeToList elabReplTarget ++ elabHaddockTargets
+              ++ elabReplTarget ++ elabHaddockTargets
 
     componentHasHaddocks :: ComponentTarget -> Bool
     componentHasHaddocks (ComponentTarget name _) =
@@ -1339,7 +1352,7 @@ buildInplaceUnpackedPackage verbosity
         -- Repl phase
         --
         whenRepl $
-          annotateFailureNoLog ReplFailed $
+          annotateFailureNoLog ReplFailed $ do
           setupInteractive replCommand replFlags replArgs
 
         -- Haddock phase
@@ -1400,8 +1413,8 @@ buildInplaceUnpackedPackage verbosity
       | otherwise                   = action
 
     whenRepl action
-      | isNothing (elabReplTarget pkg) = return ()
-      | otherwise                     = action
+      | null (elabReplTarget pkg) = return ()
+      | otherwise                 = action
 
     whenHaddock action
       | hasValidHaddockTargets pkg = action
@@ -1442,6 +1455,7 @@ buildInplaceUnpackedPackage verbosity
     replCommand      = Cabal.replCommand defaultProgramDb
     replFlags _      = setupHsReplFlags pkg pkgshared
                                         verbosity builddir
+
     replArgs _       = setupHsReplArgs  pkg
 
     haddockCommand   = Cabal.haddockCommand
@@ -1459,7 +1473,7 @@ buildInplaceUnpackedPackage verbosity
                      -> (Version -> flags) -> (Version -> [String]) -> IO ()
     setupInteractive cmd flags args =
       setupWrapper verbosity
-                   scriptOptions { isInteractive = True }
+                   scriptOptions { isInteractive = False }
                    (Just (elabPkgDescription pkg))
                    cmd flags args
 

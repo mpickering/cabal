@@ -203,6 +203,7 @@ repl     :: PackageDescription  -- ^ Mostly information from the .cabal file
          -> [String]
          -> IO ()
 repl pkg_descr lbi flags suffixes args = do
+  print ("repl", (localUnitId lbi))
   let distPref  = fromFlag (replDistPref flags)
       verbosity = fromFlag (replVerbosity flags)
 
@@ -214,7 +215,7 @@ repl pkg_descr lbi flags suffixes args = do
     [target] -> return target
     _        -> die' verbosity $ "The 'repl' command does not support multiple targets at once."
   let componentsToBuild = neededTargetsInBuildOrder' pkg_descr lbi [nodeKey target]
-  debug verbosity $ "Component build order: "
+  print $ "Component build order: "
                  ++ intercalate ", "
                       (map (showComponentName . componentLocalName . targetCLBI)
                            componentsToBuild)

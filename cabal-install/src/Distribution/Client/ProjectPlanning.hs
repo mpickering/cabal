@@ -139,7 +139,7 @@ import           Distribution.Simple.Program.Db
 import           Distribution.Simple.Program.Find
 import qualified Distribution.Simple.Setup as Cabal
 import           Distribution.Simple.Setup
-  (Flag(..), toFlag, flagToMaybe, flagToList, fromFlagOrDefault)
+  (Flag(..), toFlag, flagToMaybe, flagToList, fromFlagOrDefault, ReplOptions (replOptionsMultiFile))
 import qualified Distribution.Simple.Configure as Cabal
 import qualified Distribution.Simple.LocalBuildInfo as Cabal
 import           Distribution.Simple.LocalBuildInfo
@@ -1833,7 +1833,7 @@ elaborateInstallPlan verbosity platform compiler compilerprogdb pkgConfigDB
         elabBuildTargets    = []
         elabTestTargets     = []
         elabBenchTargets    = []
-        elabReplTarget      = Nothing
+        elabReplTarget      = []
         elabHaddockTargets  = []
 
         elabBuildHaddocks   =
@@ -2674,7 +2674,7 @@ nubComponentTargets =
 
 pkgHasEphemeralBuildTargets :: ElaboratedConfiguredPackage -> Bool
 pkgHasEphemeralBuildTargets elab =
-    isJust (elabReplTarget elab)
+    (not . null) (elabReplTarget elab)
  || (not . null) (elabTestTargets elab)
  || (not . null) (elabBenchTargets elab)
  || (not . null) (elabHaddockTargets elab)
@@ -2778,13 +2778,11 @@ setRootTargets targetAction perPkgTargetsMap =
         (Just tgts,  TargetActionBuild)   -> elab { elabBuildTargets = tgts }
         (Just tgts,  TargetActionTest)    -> elab { elabTestTargets  = tgts }
         (Just tgts,  TargetActionBench)   -> elab { elabBenchTargets  = tgts }
-        (Just [tgt], TargetActionRepl)    -> elab { elabReplTarget = Just tgt
+        (Just tgts, TargetActionRepl)    -> elab { elabReplTarget = tgts
                                                   , elabBuildHaddocks = False }
         (Just tgts,  TargetActionHaddock) ->
           foldr setElabHaddockTargets (elab { elabHaddockTargets = tgts
                                             , elabBuildHaddocks = True }) tgts
-        (Just _,     TargetActionRepl)    ->
-          error "pruneInstallPlanToTargets: multiple repl targets"
 
     setElabHaddockTargets tgt elab
       | isTestComponentTarget tgt       = elab { elabHaddockTestSuites  = True }
@@ -2824,7 +2822,7 @@ pruneInstallPlanPass1 pkgs =
                    , null (elabBuildTargets elab)
                    , null (elabTestTargets elab)
                    , null (elabBenchTargets elab)
-                   , isNothing (elabReplTarget elab)
+                   , null (elabReplTarget elab)
                    , null (elabHaddockTargets elab)
                    ]
           then Just (installedUnitId elab)
@@ -2922,7 +2920,7 @@ pruneInstallPlanPass1 pkgs =
         | ComponentTarget cname _ <- elabBuildTargets pkg
                                   ++ elabTestTargets pkg
                                   ++ elabBenchTargets pkg
-                                  ++ maybeToList (elabReplTarget pkg)
+                                  ++ elabReplTarget pkg
                                   ++ elabHaddockTargets pkg
         , stanza <- maybeToList $
                     componentOptionalStanza $
@@ -3654,21 +3652,24 @@ setupHsReplFlags :: ElaboratedConfiguredPackage
                  -> Verbosity
                  -> FilePath
                  -> Cabal.ReplFlags
-setupHsReplFlags _ sharedConfig verbosity builddir =
+setupHsReplFlags elbi sharedConfig verbosity builddir =
     Cabal.ReplFlags {
       replProgramPaths = mempty, --unused, set at configure time
       replProgramArgs  = mempty, --unused, set at configure time
       replVerbosity    = toFlag verbosity,
       replDistPref     = toFlag builddir,
       replReload       = mempty, --only used as callback from repl
-      replReplOptions  = pkgConfigReplOptions sharedConfig       --runtime override for repl flags
+      replReplOptions  = (pkgConfigReplOptions sharedConfig) { replOptionsMultiFile = Flag outfile}      --runtime override for repl flags
     }
+  where
+    outfile = "/home/matt/simple-cabal-test/units/" ++ unUnitId (elabUnitId elbi)
 
 
 setupHsReplArgs :: ElaboratedConfiguredPackage -> [String]
 setupHsReplArgs elab =
-    maybe [] (\t -> [showComponentTarget (packageId elab) t]) (elabReplTarget elab)
+    concatMap (\t -> [showComponentTarget (packageId elab) t]) (elabReplTarget elab)
     --TODO: should be able to give multiple modules in one component
+    --TODO: MP: Multi
 
 
 setupHsCopyFlags :: ElaboratedConfiguredPackage
