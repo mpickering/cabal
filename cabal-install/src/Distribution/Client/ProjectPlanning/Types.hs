@@ -738,6 +738,7 @@ data ElaboratedPackage = ElaboratedPackage
   , pkgStanzasEnabled :: OptionalStanzaSet
   -- ^ Which optional stanzas (ie testsuites, benchmarks) will actually
   -- be enabled during the package configure step.
+  , why_not_per_component :: [String]
   }
   deriving (Eq, Show, Generic)
 

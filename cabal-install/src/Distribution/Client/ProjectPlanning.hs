@@ -1671,7 +1671,7 @@ elaborateInstallPlan
               else do
                 checkPerPackageOk comps not_per_component_reasons
                 return
-                  [ elaborateSolverToPackage spkg g $
+                  [ elaborateSolverToPackage (map prettyShow not_per_component_reasons) spkg g $
                       comps ++ maybeToList setupComponent
                   ]
           Left cns ->
@@ -2024,11 +2024,13 @@ elaborateInstallPlan
               <$> executables
 
       elaborateSolverToPackage
-        :: SolverPackage UnresolvedPkgLoc
+        :: [String] -- ^ Reasons why this solver is not per component
+        -> SolverPackage UnresolvedPkgLoc
         -> ComponentsGraph
         -> [ElaboratedConfiguredPackage]
         -> ElaboratedConfiguredPackage
       elaborateSolverToPackage
+        why_not_per_component
         pkg@( SolverPackage
                 (SourcePackage pkgid _gpd _srcloc _descOverride)
                 _flags
