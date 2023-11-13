@@ -1,0 +1,15 @@
+synopsis: Fix assertion failure when --enable-documentation is enabled
+packages: cabal-install
+prs: #9446
+issuesa: #6006
+
+description: {
+
+If any non-library components ended up in the install plan for a library and
+--enable-documentation was enabled, then cabal would throw an assertion failure
+due to mismatched hashes. Now the relevant part of the package description is not
+updated after the hash has been calculated, and the check about whether to actually build documentation happens
+at the point documentation is built.
+
+
+}
