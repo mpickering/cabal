@@ -682,8 +682,10 @@ getExternalSetupMethod verbosity options pkg bt = do
     setupDir = workingDir options </> useDistPref options </> "setup"
     setupVersionFile = setupDir </> "setup" <.> "version"
     setupHs = setupDir </> "setup" <.> "hs"
+    hooksHs = setupDir </> "hooks" <.> "hs"
     setupHooks = setupDir </> "SetupHooks" <.> "hs"
     setupProgFile = setupDir </> "setup" <.> exeExtension buildPlatform
+    hooksProgFile = setupDir </> "hooks" <.> exeExtension buildPlatform
     platform = fromMaybe buildPlatform (usePlatform options)
 
     useCachedSetupExecutable = (bt == Simple || bt == Configure || bt == Make)
@@ -823,15 +825,31 @@ getExternalSetupMethod verbosity options pkg bt = do
     updateSetupScript cabalLibVersion _ =
       rewriteFileLBS verbosity setupHs (buildTypeScript cabalLibVersion)
 
+--    hooksScript :: BS.ByteString
+--    hooksScript = "import Distribution.Simple.UserHooks; import SetupHooks; main = hooksMain testHooks\n"
+-- SetupHooks TODO
+
     buildTypeScript :: Version -> BS.ByteString
     buildTypeScript cabalLibVersion = case bt of
       Simple -> "import Distribution.Simple; main = defaultMain\n"
       Configure
-        | cabalLibVersion >= mkVersion [1, 3, 10] -> "import Distribution.Simple; main = defaultMainWithHooks autoconfUserHooks\n"
-        | otherwise -> "import Distribution.Simple; main = defaultMainWithHooks defaultUserHooks\n"
+        | cabalLibVersion >= mkVersion [1, 3, 10]
+        -> "import Distribution.Simple; main = defaultMainWithSetupHooks autoconfSetupHooks\n"
+        | otherwise
+        -> "import Distribution.Simple; main = defaultMainWithHooks defaultUserHooks\n"
       Make -> "import Distribution.Make; main = defaultMain\n"
+--    Hooks -> "import Distribution.Simple; import Distribution.Simple.UserHooks; main = defaultMainWithHooks (externalUserHooks " <> (fromString (show hooksProgFile)) <> ")\n"
       Hooks -> "import Distribution.Simple; import SetupHooks; main = defaultMainWithSetupHooks setupHooks\n"
       Custom -> error "buildTypeScript Custom"
+
+
+    {-
+    Compile ./Hooks from SetupHooks.hs
+    do
+      preConf a1 a2
+      => call ./Hooks preConf with stdin = <args> and stdout = <result>
+
+    -}
 
     installedCabalVersion
       :: SetupScriptOptions
@@ -1007,15 +1025,26 @@ getExternalSetupMethod verbosity options pkg bt = do
         where
           criticalSection' = maybe id criticalSection $ setupCacheLock options'
 
+    compileSetupExecutable a b c d = do
+      putStrLn "Compiling Setup.hs"
+--      when (bt == Hooks) (() <$ compileHooksExecutable a b c d)
+      compileSetupExecutableX setupHs setupProgFile a b c d
+
+    compileHooksExecutable = compileSetupExecutableX hooksHs hooksProgFile
+
     -- \| If the Setup.hs is out of date wrt the executable then recompile it.
     -- Currently this is GHC/GHCJS only. It should really be generalised.
-    compileSetupExecutable
-      :: SetupScriptOptions
+    compileSetupExecutableX
+      :: FilePath
+      -> FilePath
+      -> SetupScriptOptions
       -> Version
       -> Maybe ComponentId
       -> Bool
       -> IO FilePath
-    compileSetupExecutable
+    compileSetupExecutableX
+      in_file
+      out_file
       options'
       cabalLibVersion
       maybeCabalLibInstalledPkgId
@@ -1070,8 +1099,8 @@ getExternalSetupMethod verbosity options pkg bt = do
                     -- --ghc-option=-v instead!
                     ghcOptVerbosity = Flag (min verbosity normal)
                   , ghcOptMode = Flag GhcModeMake
-                  , ghcOptInputFiles = toNubListR [setupHs]
-                  , ghcOptOutputFile = Flag setupProgFile
+                  , ghcOptInputFiles = toNubListR [in_file]
+                  , ghcOptOutputFile = Flag out_file
                   , ghcOptObjDir = Flag setupDir
                   , ghcOptHiDir = Flag setupDir
                   , ghcOptSourcePathClear = Flag True
@@ -1106,7 +1135,7 @@ getExternalSetupMethod verbosity options pkg bt = do
                   progdb
                   ghcCmdLine
               hPutStr logHandle output
-        return setupProgFile
+        return out_file
 
 isCabalPkgId :: PackageIdentifier -> Bool
 isCabalPkgId (PackageIdentifier pname _) = pname == mkPackageName "Cabal"

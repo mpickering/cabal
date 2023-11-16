@@ -46,6 +46,7 @@ module Distribution.Simple.Setup.Common
   , reqArgFlag
   , optionVerbosity
   , optionNumJobs
+  , optionHooksExecutable
   ) where
 
 import Distribution.Compat.Prelude hiding (get)
@@ -267,6 +268,20 @@ optionDistPref get set = \showOrParseArgs ->
   where
     distPrefFlagName ShowArgs = ["builddir"]
     distPrefFlagName ParseArgs = ["builddir", "distdir", "distpref"]
+
+optionHooksExecutable
+  :: (flags -> Flag FilePath)
+  -> (Flag FilePath -> flags -> flags)
+  -> OptionField flags
+optionHooksExecutable get set =
+  option
+    ""
+    ["hooks"]
+    ( "The executable to run to discover the build hooks"
+      )
+    get
+    set
+    (reqArgFlag "EXE")
 
 optionVerbosity
   :: (flags -> Flag Verbosity)

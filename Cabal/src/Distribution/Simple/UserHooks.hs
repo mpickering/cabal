@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 -----------------------------------------------------------------------------
 
@@ -30,17 +32,23 @@ module Distribution.Simple.UserHooks
   ( UserHooks (..)
   , Args
   , emptyUserHooks
+  , hooksMain
   ) where
 
 import Distribution.Compat.Prelude hiding (getContents, putStr)
 import Prelude ()
 
+import Distribution.Compat.Binary
 import Distribution.PackageDescription
 import Distribution.Simple.Command
 import Distribution.Simple.LocalBuildInfo
 import Distribution.Simple.PreProcess
 import Distribution.Simple.Program
 import Distribution.Simple.Setup
+
+import Data.ByteString.Lazy (getContents, putStr, hPutStr)
+import System.Environment (getArgs)
+import System.IO (stderr, hPrint)
 
 type Args = [String]
 
@@ -184,3 +192,26 @@ emptyUserHooks =
     rn args _ = noExtraFlags args >> return emptyHookedBuildInfo
     rn' _ _ = return emptyHookedBuildInfo
     ru _ _ _ _ = return ()
+
+
+
+-- | Create an executable which accepts the name of a hook as the argument,
+-- then reads arguments to the hook over stdin and writes the results of the hook
+-- to stdout.
+hooksMain :: UserHooks -> IO ()
+hooksMain user_hooks = do
+  [hookName] <- getArgs
+  hPutStr stderr (fromString hookName)
+  case hookName of
+   "preConf" -> do
+      hPutStr stderr "preConfHook"
+      s <- getContents
+      hPutStr stderr "got stdin"
+     -- hPutStr stderr s
+      let (a1, a2) = decode s
+      hPrint stderr (a1, a2)
+      res <- preConf user_hooks a1 a2
+      hPutStr stderr "pre_conf\n"
+      hPutStr stderr ("abc" <> encode (show res))
+      putStr (encode res)
+   _ -> error "Hook not yet implemented"

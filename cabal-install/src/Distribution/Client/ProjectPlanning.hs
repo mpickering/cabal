@@ -4136,6 +4136,7 @@ setupHsConfigureFlags
       elab
       (Cabal.ConfigFlags{..})
     where
+      configHooksExecutable = mempty -- SetupHooks TODO
       configArgs = mempty -- unused, passed via args
       configDistPref = toFlag builddir
       configCabalFilePath = mempty

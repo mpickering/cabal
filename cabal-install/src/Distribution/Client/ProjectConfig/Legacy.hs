@@ -1037,6 +1037,7 @@ convertToLegacyAllPackageConfig
           , configUseResponseFiles = mempty
           , configDumpBuildInfo = mempty
           , configAllowDependingOnPrivateLibs = mempty
+          , configHooksExecutable = mempty
           }
 
       haddockFlags =
@@ -1113,6 +1114,7 @@ convertToLegacyPerPackageConfig PackageConfig{..} =
         , configUseResponseFiles = mempty
         , configDumpBuildInfo = packageConfigDumpBuildInfo
         , configAllowDependingOnPrivateLibs = mempty
+        , configHooksExecutable = mempty
         }
 
     installFlags =

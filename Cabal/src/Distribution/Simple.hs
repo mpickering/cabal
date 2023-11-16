@@ -67,16 +67,17 @@ module Distribution.Simple
   , autoconfUserHooks
   , autoconfSetupHooks
   , emptyUserHooks
+  , externalUserHooks
   ) where
 
-import Control.Exception (try)
+import Control.Exception (try, mask)
 
 import Distribution.Compat.Prelude
-import Distribution.Compat.ResponseFile (expandResponse)
 import Prelude ()
 
 -- local
-
+import Distribution.Compat.Binary
+import Distribution.Compat.ResponseFile (expandResponse)
 import Distribution.Package
 import Distribution.PackageDescription
 import Distribution.PackageDescription.Configuration
@@ -118,7 +119,12 @@ import Distribution.Version
 import Language.Haskell.Extension
 
 -- Base
+import Control.Concurrent.MVar
+import Control.Concurrent
+import qualified Control.Exception as C
+import Data.ByteString.Lazy (hPutStr, hGetContents)
 import Data.List (unionBy, (\\))
+import GHC.IO.Handle (BufferMode(..), hClose, hSetBuffering)
 import System.Directory
   ( doesDirectoryExist
   , doesFileExist
@@ -127,7 +133,8 @@ import System.Directory
   )
 import System.Environment (getArgs, getProgName)
 import System.FilePath (takeDirectory, (</>))
-
+import System.IO (stderr)
+import System.Process
 
 -- | A simple implementation of @main@ for a Cabal setup script.
 -- It reads the package description file using IO, and performs the
@@ -843,6 +850,48 @@ clean_setupHooks
         then removeDirectoryRecursive fname
         else when isFile $ removeFile fname
     verbosity = fromFlag (cleanVerbosity flags)
+
+withForkWait :: IO () -> (IO () ->  IO a) -> IO a
+withForkWait async body = do
+  waitVar <- newEmptyMVar :: IO (MVar (Either SomeException ()))
+  mask $ \restore -> do
+    tid <- forkIO $ try (restore async) >>= putMVar waitVar
+    let wait = takeMVar waitVar >>= either throwIO return
+    restore (body wait) `C.onException` killThread tid
+
+-- Only for testing
+-- Query an external executable which runs the user hook.
+externalUserHooks :: FilePath -> UserHooks
+externalUserHooks exe =
+  simpleUserHooks {
+    preConf = readHooksExe "preConf"
+  }
+  where
+    readHooksExe :: (Binary a1, Binary a2, Binary b) => String -> a1 -> a2 -> IO b
+    readHooksExe hook args cfgFlags =
+      let stdin_ = encode (args, cfgFlags)
+          cp = (proc exe [hook]) { std_in = CreatePipe
+                                 , std_out = CreatePipe }
+      in withCreateProcess cp $ \(Just inh) (Just outh) Nothing ph -> do
+          -- fork off a thread to start consuming the output
+            hSetBuffering inh NoBuffering
+            hSetBuffering outh NoBuffering
+            output  <- hGetContents outh
+            withForkWait (C.evaluate $ rnf output) $ \waitOut -> do
+
+              hPutStr inh stdin_
+              -- hClose performs implicit hFlush, and thus may trigger a SIGPIPE
+              ignoreSigPipe $ hClose inh
+
+              -- wait on the output
+              waitOut
+              hClose outh
+
+            -- wait on the process
+            _ex <- waitForProcess ph
+            hPutStr stderr ("out" <> output)
+            return (decode output)
+
 
 -- --------------------------------------------------------------------------
 -- Default hooks

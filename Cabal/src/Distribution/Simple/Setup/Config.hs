@@ -220,6 +220,7 @@ data ConfigFlags = ConfigFlags
   -- ^ Allow depending on private sublibraries. This is used by external
   -- tools (like cabal-install) so they can add multiple-public-libraries
   -- compatibility to older ghcs by checking visibility externally.
+  , configHooksExecutable :: Flag FilePath
   }
   deriving (Generic, Read, Show, Typeable)
 
@@ -401,6 +402,7 @@ configureOptions showOrParseArgs =
       configDistPref
       (\d flags -> flags{configDistPref = d})
       showOrParseArgs
+  , optionHooksExecutable configHooksExecutable (\fp flags -> flags { configHooksExecutable = fp })
   , option
       []
       ["compiler"]

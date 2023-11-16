@@ -527,6 +527,8 @@ instance Semigroup SavedConfig where
           , configDumpBuildInfo = combine configDumpBuildInfo
           , configAllowDependingOnPrivateLibs =
               combine configAllowDependingOnPrivateLibs
+          , configHooksExecutable =
+              combine configHooksExecutable
           }
         where
           combine = combine' savedConfigureFlags
