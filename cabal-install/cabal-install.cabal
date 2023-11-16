@@ -325,6 +325,7 @@ test-suite unit-tests
           cabal-install,
           Cabal-tree-diff,
           Cabal-QuickCheck,
+          Cabal-tests,
           containers,
           directory,
           filepath,
@@ -410,6 +411,7 @@ test-suite long-tests
   build-depends:
         Cabal-QuickCheck,
         Cabal-described,
+        Cabal-tests,
         cabal-install,
         containers,
         directory,
