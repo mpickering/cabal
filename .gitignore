@@ -11,6 +11,7 @@ cabal-dev/
 *.tix
 dist
 dist-*
+hie.yaml
 register.sh
 ./cabal.config
 cabal-tests.log
