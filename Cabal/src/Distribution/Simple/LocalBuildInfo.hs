@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 
 -----------------------------------------------------------------------------
@@ -24,6 +26,11 @@ module Distribution.Simple.LocalBuildInfo
   , localComponentId
   , localUnitId
   , localCompatPackageKey
+
+    -- * Convenience accessors
+  , buildDir
+  , cabalFilePath
+  , progPrefix, progSuffix
 
     -- * Buildable package components
   , Component (..)
@@ -200,8 +207,8 @@ withAllComponentsInBuildOrder pkg lbi f =
 allComponentsInBuildOrder
   :: LocalBuildInfo
   -> [ComponentLocalBuildInfo]
-allComponentsInBuildOrder lbi =
-  Graph.topSort (componentGraph lbi)
+allComponentsInBuildOrder (LocalBuildInfo { componentGraph }) =
+  Graph.topSort componentGraph
 
 -- -----------------------------------------------------------------------------
 -- A random function that has no business in this module
@@ -219,9 +226,11 @@ depLibraryPaths
   -> ComponentLocalBuildInfo
   -- ^ Component that is being built
   -> IO [FilePath]
-depLibraryPaths inplace relative lbi clbi = do
-  let pkgDescr = localPkgDescr lbi
-      installDirs = absoluteComponentInstallDirs pkgDescr lbi (componentUnitId clbi) NoCopyDest
+depLibraryPaths inplace relative
+  lbi@(LocalBuildInfo { localPkgDescr = pkgDescr
+                      , installedPkgs })
+  clbi = do
+  let installDirs = absoluteComponentInstallDirs pkgDescr lbi (componentUnitId clbi) NoCopyDest
       executable = case clbi of
         ExeComponentLocalBuildInfo{} -> True
         _ -> False
@@ -269,7 +278,7 @@ depLibraryPaths inplace relative lbi clbi = do
   -- is a moot point if you are using a per-component build,
   -- because you never have any internal libraries in this case;
   -- they're all external.
-  let external_ipkgs = filter is_external (allPackages (installedPkgs lbi))
+  let external_ipkgs = filter is_external (allPackages installedPkgs)
       is_external ipkg = not (installedUnitId ipkg `elem` internalDeps)
       -- First look for dynamic libraries in `dynamic-library-dirs`, and use
       -- `library-dirs` as a fall back.
@@ -341,14 +350,16 @@ absoluteComponentInstallDirs
   -> UnitId
   -> CopyDest
   -> InstallDirs FilePath
-absoluteComponentInstallDirs pkg lbi uid copydest =
+absoluteComponentInstallDirs pkg
+  (LocalBuildInfo { compiler, hostPlatform, installDirTemplates })
+  uid copydest =
   InstallDirs.absoluteInstallDirs
     (packageId pkg)
     uid
-    (compilerInfo (compiler lbi))
+    (compilerInfo compiler)
     copydest
-    (hostPlatform lbi)
-    (installDirTemplates lbi)
+    hostPlatform
+    installDirTemplates
 
 absoluteInstallCommandDirs
   :: PackageDescription
@@ -397,13 +408,15 @@ prefixRelativeComponentInstallDirs
   -> LocalBuildInfo
   -> UnitId
   -> InstallDirs (Maybe FilePath)
-prefixRelativeComponentInstallDirs pkg_descr lbi uid =
+prefixRelativeComponentInstallDirs pkg_descr
+  (LocalBuildInfo { compiler, hostPlatform, installDirTemplates })
+  uid =
   InstallDirs.prefixRelativeInstallDirs
     (packageId pkg_descr)
     uid
-    (compilerInfo (compiler lbi))
-    (hostPlatform lbi)
-    (installDirTemplates lbi)
+    (compilerInfo compiler)
+    hostPlatform
+    installDirTemplates
 
 substPathTemplate
   :: PackageId
@@ -411,7 +424,9 @@ substPathTemplate
   -> UnitId
   -> PathTemplate
   -> FilePath
-substPathTemplate pkgid lbi uid =
+substPathTemplate pkgid
+  (LocalBuildInfo { compiler, hostPlatform })
+  uid =
   fromPathTemplate
     . (InstallDirs.substPathTemplate env)
   where
@@ -419,5 +434,5 @@ substPathTemplate pkgid lbi uid =
       initialPathTemplateEnv
         pkgid
         uid
-        (compilerInfo (compiler lbi))
-        (hostPlatform lbi)
+        (compilerInfo compiler)
+        hostPlatform

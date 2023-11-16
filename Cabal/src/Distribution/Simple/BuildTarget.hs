@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 
 -----------------------------------------------------------------------------
@@ -1041,10 +1043,12 @@ checkBuildTargets
   -> IO [TargetInfo]
 checkBuildTargets _ pkg_descr lbi [] =
   return (allTargetsInBuildOrder' pkg_descr lbi)
-checkBuildTargets verbosity pkg_descr lbi targets = do
+checkBuildTargets verbosity pkg_descr
+  lbi@(LocalBuildInfo { componentEnabledSpec })
+  targets = do
   let (enabled, disabled) =
         partitionEithers
-          [ case componentDisabledReason (componentEnabledSpec lbi) comp of
+          [ case componentDisabledReason componentEnabledSpec comp of
             Nothing -> Left target'
             Just reason -> Right (cname, reason)
           | target <- targets
