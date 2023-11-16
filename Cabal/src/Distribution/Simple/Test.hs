@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 
 -----------------------------------------------------------------------------
@@ -15,7 +16,7 @@
 -- \"@.\/setup test@\" action. It runs test suites designated in the package
 -- description and reports on the results.
 module Distribution.Simple.Test
-  ( test
+  ( test, test_setupHooks
   ) where
 
 import Distribution.Compat.Prelude
@@ -28,6 +29,8 @@ import Distribution.Simple.Flag (fromFlag)
 import Distribution.Simple.Hpc
 import Distribution.Simple.InstallDirs
 import qualified Distribution.Simple.LocalBuildInfo as LBI
+import Distribution.Simple.SetupHooks.Internal
+  ( TestHooks(..), noTestHooks )
 import Distribution.Simple.Setup.Test
 import qualified Distribution.Simple.Test.ExeV10 as ExeV10
 import qualified Distribution.Simple.Test.LibV09 as LibV09
@@ -57,7 +60,24 @@ test
   -> TestFlags
   -- ^ flags sent to test
   -> IO ()
-test args pkg_descr lbi flags = do
+test = test_setupHooks noTestHooks
+
+-- | Perform the \"@.\/setup test@\" action.
+test_setupHooks
+  :: TestHooks
+  -> Args
+  -- ^ positional command-line arguments
+  -> PD.PackageDescription
+  -- ^ information from the .cabal file
+  -> LBI.LocalBuildInfo
+  -- ^ information from the configure step
+  -> TestFlags
+  -- ^ flags sent to test
+  -> IO ()
+test_setupHooks
+  (TestHooks { preTestPackageHook, preTestComponentHook
+             , postTestComponentHook, postTestPackageHook })
+  args pkg_descr lbi flags = do
   let verbosity = fromFlag $ testVerbosity flags
       machineTemplate = fromFlag $ testMachineLog flags
       distPref = fromFlag $ testDistPref flags
@@ -71,8 +91,12 @@ test args pkg_descr lbi flags = do
            , Maybe TestSuiteLog
            )
         -> IO TestSuiteLog
-      doTest ((suite, clbi), _) =
-        case PD.testInterface suite of
+      doTest ((suite, clbi), _) = do
+
+        for_ preTestComponentHook $ \ preTest ->
+          preTest args lbi flags suite clbi
+
+        testResult <- case PD.testInterface suite of
           PD.TestSuiteExeV10 _ _ ->
             ExeV10.runTest pkg_descr lbi clbi flags suite
           PD.TestSuiteLibV09 _ _ ->
@@ -92,6 +116,14 @@ test args pkg_descr lbi flags = do
                       }
                 , logFile = ""
                 }
+
+        for_ postTestComponentHook $ \ postTest ->
+          postTest args lbi flags suite clbi
+
+        return testResult
+
+  for_ preTestPackageHook $ \ preTest ->
+    preTest args lbi flags
 
   unless (PD.hasTests pkg_descr) $ do
     notice verbosity "Package has no test suites."
@@ -139,6 +171,9 @@ test args pkg_descr lbi flags = do
   when (LBI.testCoverage lbi) $
     markupPackage verbosity lbi distPref pkg_descr $
       map (fst . fst) testsToRun
+
+  for_ postTestPackageHook $ \ postTest ->
+    postTest args lbi flags
 
   unless allOk exitFailure
 

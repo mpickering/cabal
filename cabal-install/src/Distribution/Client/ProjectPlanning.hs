@@ -1700,6 +1700,9 @@ elaborateInstallPlan
                 case PD.buildType (elabPkgDescription elab0) of
                   PD.Configure -> cuz "build-type is Configure"
                   PD.Custom -> cuz "build-type is Custom"
+                  -- Eventually, Hooks can be done per component, so when
+                  -- everything else has been migrated we can get rid of this
+                  PD.Hooks -> cuz "build-type is Hooks"
                   _ -> []
               -- cabal-format versions prior to 1.8 have different build-depends semantics
               -- for now it's easier to just fallback to legacy-mode when specVersion < 1.8
@@ -1750,7 +1753,7 @@ elaborateInstallPlan
           -- have to add dependencies on this from all other components
           setupComponent :: Maybe ElaboratedConfiguredPackage
           setupComponent
-            | PD.buildType (elabPkgDescription elab0) == PD.Custom =
+            | PD.buildType (elabPkgDescription elab0) `elem` [PD.Hooks, PD.Custom] =
                 Just
                   elab0
                     { elabModuleShape = emptyModuleShape
@@ -3796,17 +3799,17 @@ newtype CannotPruneDependencies
 -- | Work out the 'SetupScriptStyle' given the package description.
 packageSetupScriptStyle :: PD.PackageDescription -> SetupScriptStyle
 packageSetupScriptStyle pkg
-  | buildType == PD.Custom
+  | buildType == PD.Custom || buildType == PD.Hooks
   , Just setupbi <- PD.setupBuildInfo pkg -- does have a custom-setup stanza
   , not (PD.defaultSetupDepends setupbi) -- but not one we added internally
     =
       SetupCustomExplicitDeps
-  | buildType == PD.Custom
+  | buildType `elem` [PD.Custom, PD.Hooks]
   , Just setupbi <- PD.setupBuildInfo pkg -- we get this case post-solver as
   , PD.defaultSetupDepends setupbi -- the solver fills in the deps
     =
       SetupCustomImplicitDeps
-  | buildType == PD.Custom
+  | buildType `elem` [PD.Custom, PD.Hooks]
   , Nothing <- PD.setupBuildInfo pkg -- we get this case pre-solver
     =
       SetupCustomImplicitDeps

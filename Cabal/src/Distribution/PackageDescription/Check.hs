@@ -1263,7 +1263,7 @@ checkFields pkg =
         PackageDistInexcusable ZPrefix
     , check (isNothing (buildTypeRaw pkg) && specVersion pkg < CabalSpecV2_2) $
         PackageBuildWarning NoBuildType
-    , check (isJust (setupBuildInfo pkg) && buildType pkg /= Custom) $
+    , check (isJust (setupBuildInfo pkg) && buildType pkg `notElem` [Custom, Hooks]) $
         PackageBuildWarning NoCustomSetup
     , check (not (null unknownCompilers)) $
         PackageBuildWarning (UnknownCompilers unknownCompilers)

@@ -30,7 +30,7 @@
 -- the user, the amount of information displayed depending on the verbosity
 -- level.
 module Distribution.Simple.Configure
-  ( configure
+  ( configure, configure_setupHooks
   , writePersistBuildConfig
   , getConfigStateFile
   , getPersistBuildConfig
@@ -85,6 +85,9 @@ import Distribution.Simple.PreProcess
 import Distribution.Simple.Program
 import Distribution.Simple.Setup.Common as Setup
 import Distribution.Simple.Setup.Config as Setup
+import Distribution.Simple.SetupHooks.Internal
+  ( ConfigureHooks(..), noConfigureHooks, applyComponentDiffs )
+import qualified Distribution.Simple.SetupHooks.Internal as SetupHooks
 import Distribution.Simple.Utils
 import Distribution.System
 import Distribution.Types.ComponentRequestedSpec
@@ -409,18 +412,58 @@ configure
   :: (GenericPackageDescription, HookedBuildInfo)
   -> ConfigFlags
   -> IO LocalBuildInfo
-configure (g_pkg_descr, hookedBuildInfo) cfg = do
+configure = configure_setupHooks noConfigureHooks
+
+configure_setupHooks
+  :: ConfigureHooks
+  -> (GenericPackageDescription, HookedBuildInfo)
+  -> ConfigFlags
+  -> IO LocalBuildInfo
+configure_setupHooks
+  (ConfigureHooks { preConfPackageHook, postConfPackageHook
+                  , preConfComponentHook, postConfComponentHook })
+  (g_pkg_descr, hookedBuildInfo) cfg = do
 
   -- Cabal pre-configure
-  (lbc1, comp, platform) <- preConfigurePackage cfg g_pkg_descr
+  let verbosity = fromFlag (configVerbosity cfg)
+  (lbc0, comp, platform) <- preConfigurePackage cfg g_pkg_descr
+
+  -- Package-wide pre-configure hook
+  lbc1 <-
+    case preConfPackageHook of
+      Nothing -> return lbc0
+      Just pre_conf ->
+        pre_conf cfg lbc0 comp platform
 
   -- Cabal package-wide configure
   (lbc2, pbd2, pkg_info) <-
     configurePackage cfg lbc1 g_pkg_descr comp platform
 
+  -- Package-wide post-configure hook
+  for_ postConfPackageHook $ \ postConfPkg -> postConfPkg lbc2 pbd2
+    -- SetupHooks TODO: could pass pkg_info?
+
+  -- Per-component pre-configure hook
+  pkg_descr <- do
+    let pkg_descr2 = LBC.localPkgDescr pbd2
+    case preConfComponentHook of
+      Just pre_conf_component -> do
+        applyComponentDiffs verbosity
+          (pre_conf_component lbc2 pbd2)
+          -- SetupHooks TODO: could pass pkg_info?
+          pkg_descr2
+      Nothing -> return pkg_descr2
+  let pbd3 = pbd2 { LBC.localPkgDescr = pkg_descr }
+
   -- Cabal per-component configure
-  externalPkgDeps <- finalCheckPackage g_pkg_descr pbd2 hookedBuildInfo pkg_info
-  configureComponents lbc2 pbd2 pkg_info externalPkgDeps
+  externalPkgDeps <- finalCheckPackage g_pkg_descr pbd3 hookedBuildInfo pkg_info
+  lbi <- configureComponents lbc2 pbd3 pkg_info externalPkgDeps
+
+  -- Per-component post-configure hook
+  for_ postConfComponentHook $ \ post_conf_comp ->
+    SetupHooks.forComponents_ (post_conf_comp lbi) pkg_descr
+
+  return lbi
 
 preConfigurePackage
   :: ConfigFlags

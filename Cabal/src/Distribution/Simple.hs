@@ -1,7 +1,9 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings #-}
 -----------------------------------------------------------------------------
 {-
 Work around this warning:
@@ -11,6 +13,7 @@ libraries/Cabal/Distribution/Simple.hs:78:0:
              Deprecated: "Please use the new testing interface instead!"
 -}
 {-# OPTIONS_GHC -fno-warn-deprecations #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
 -- |
 -- Module      :  Distribution.Simple
@@ -53,6 +56,8 @@ module Distribution.Simple
   , UserHooks (..)
   , Args
   , defaultMainWithHooks
+  , defaultMainWithSetupHooks
+  , defaultMainWithSetupHooksArgs
   , defaultMainWithHooksArgs
   , defaultMainWithHooksNoRead
   , defaultMainWithHooksNoReadArgs
@@ -66,6 +71,7 @@ module Distribution.Simple
 import Control.Exception (try)
 
 import Distribution.Compat.Prelude
+import Distribution.Compat.ResponseFile (expandResponse)
 import Prelude ()
 
 -- local
@@ -79,6 +85,8 @@ import Distribution.Simple.PackageDescription
 import Distribution.Simple.PreProcess
 import Distribution.Simple.Program
 import Distribution.Simple.Setup
+import Distribution.Simple.SetupHooks.Internal
+  ( CleanHooks(..), noCleanHooks )
 import Distribution.Simple.UserHooks
 
 import Distribution.Simple.Build
@@ -91,11 +99,14 @@ import Distribution.License
 import Distribution.Pretty
 import Distribution.Simple.Bench
 import Distribution.Simple.BuildPaths
-import Distribution.Simple.ConfigureScript
+import Distribution.Simple.ConfigureScript ( runConfigureScript )
 import Distribution.Simple.Errors
 import Distribution.Simple.Haddock
 import Distribution.Simple.Install
 import Distribution.Simple.LocalBuildInfo
+import Distribution.Simple.SetupHooks.Internal
+  ( SetupHooks )
+import qualified Distribution.Simple.SetupHooks.Internal as SetupHooks
 import Distribution.Simple.Test
 import Distribution.Simple.Utils
 import Distribution.Verbosity
@@ -103,8 +114,7 @@ import Distribution.Version
 import Language.Haskell.Extension
 
 -- Base
-
-import Distribution.Compat.ResponseFile (expandResponse)
+import Data.List (unionBy, (\\))
 import System.Directory
   ( doesDirectoryExist
   , doesFileExist
@@ -114,7 +124,6 @@ import System.Directory
 import System.Environment (getArgs, getProgName)
 import System.FilePath (takeDirectory, (</>))
 
-import Data.List (unionBy, (\\))
 
 -- | A simple implementation of @main@ for a Cabal setup script.
 -- It reads the package description file using IO, and performs the
@@ -126,6 +135,128 @@ defaultMain = getArgs >>= defaultMainHelper simpleUserHooks
 -- arguments, rather than getting them from the environment.
 defaultMainArgs :: [String] -> IO ()
 defaultMainArgs = defaultMainHelper simpleUserHooks
+
+defaultMainWithSetupHooks :: SetupHooks -> IO ()
+defaultMainWithSetupHooks setup_hooks =
+  getArgs >>= defaultMainWithSetupHooksArgs setup_hooks
+
+defaultMainWithSetupHooksArgs :: SetupHooks -> [String] -> IO ()
+defaultMainWithSetupHooksArgs setup_hooks =
+  defaultMainHelper $
+    simpleUserHooks
+      { confHook     = setup_confHook
+      , buildHook    = setup_buildHook
+      , copyHook     = setup_copyHook
+      , instHook     = setup_installHook
+      , cleanHook    = setup_cleanHook
+      , replHook     = setup_replHook
+      , haddockHook  = setup_haddockHook
+      , hscolourHook = setup_hscolourHook
+      , testHook     = setup_testHook
+      , benchHook    = setup_benchHook
+      }
+
+  where
+    setup_confHook
+      :: (GenericPackageDescription, HookedBuildInfo)
+      -> ConfigFlags
+      -> IO LocalBuildInfo
+    setup_confHook =
+      configure_setupHooks
+        (SetupHooks.configureHooks setup_hooks)
+
+    setup_buildHook
+      :: PackageDescription
+      -> LocalBuildInfo
+      -> UserHooks
+      -> BuildFlags
+      -> IO ()
+    setup_buildHook pkg_descr lbi hooks flags =
+      build_setupHooks (SetupHooks.buildHooks setup_hooks)
+        pkg_descr lbi flags (allSuffixHandlers hooks)
+
+    setup_copyHook
+      :: PackageDescription
+      -> LocalBuildInfo
+      -> UserHooks
+      -> CopyFlags
+      -> IO ()
+    setup_copyHook pkg_descr lbi _hooks flags =
+      install_setupHooks (SetupHooks.copyHooks setup_hooks)
+        pkg_descr lbi flags
+
+    setup_installHook
+      :: PackageDescription
+      -> LocalBuildInfo
+      -> UserHooks
+      -> InstallFlags
+      -> IO ()
+    setup_installHook =
+      defaultInstallHook_setupHooks
+        (SetupHooks.copyHooks setup_hooks)
+
+    setup_cleanHook
+      :: PackageDescription
+      -> ()
+      -> UserHooks
+      -> CleanFlags
+      -> IO ()
+    setup_cleanHook pkg_descr _ _hooks flags =
+      clean_setupHooks (SetupHooks.cleanHooks setup_hooks)
+        pkg_descr flags
+
+    setup_replHook
+      :: PackageDescription
+      -> LocalBuildInfo
+      -> UserHooks
+      -> ReplFlags
+      -> [String]
+      -> IO ()
+    setup_replHook pkg_descr lbi hooks flags args =
+      repl_setupHooks (SetupHooks.buildHooks setup_hooks)
+        pkg_descr lbi flags (allSuffixHandlers hooks) args
+
+    setup_haddockHook
+      :: PackageDescription
+      -> LocalBuildInfo
+      -> UserHooks
+      -> HaddockFlags
+      -> IO ()
+    setup_haddockHook pkg_descr lbi hooks flags =
+      haddock_setupHooks (SetupHooks.buildHooks setup_hooks)
+        pkg_descr lbi (allSuffixHandlers hooks) flags
+
+    setup_hscolourHook
+      :: PackageDescription
+      -> LocalBuildInfo
+      -> UserHooks
+      -> HscolourFlags
+      -> IO ()
+    setup_hscolourHook pkg_descr lbi hooks flags =
+      hscolour_setupHooks (SetupHooks.buildHooks setup_hooks)
+        pkg_descr lbi (allSuffixHandlers hooks) flags
+
+    setup_testHook
+      :: Args
+      -> PackageDescription
+      -> LocalBuildInfo
+      -> UserHooks
+      -> TestFlags
+      -> IO ()
+    setup_testHook args pkg_descr lbi _hooks flags =
+      test_setupHooks (SetupHooks.testHooks setup_hooks)
+        args pkg_descr lbi flags
+
+    setup_benchHook
+      :: Args
+      -> PackageDescription
+      -> LocalBuildInfo
+      -> UserHooks
+      -> BenchmarkFlags
+      -> IO ()
+    setup_benchHook args pkg_descr lbi _hooks flags =
+      bench_setupHooks (SetupHooks.benchmarkHooks setup_hooks)
+        args pkg_descr lbi flags
 
 -- | A customizable version of 'defaultMain'.
 defaultMainWithHooks :: UserHooks -> IO ()
@@ -192,8 +323,8 @@ defaultMainHelper hooks args = topHandler $ do
       , installCommand `commandAddAction` installAction hooks
       , copyCommand `commandAddAction` copyAction hooks
       , haddockCommand `commandAddAction` haddockAction hooks
-      , cleanCommand `commandAddAction` cleanAction hooks
-      , sdistCommand `commandAddAction` sdistAction hooks
+      , cleanCommand `commandAddAction` cleanAction  hooks
+      , sdistCommand `commandAddAction` sdistAction  hooks
       , hscolourCommand `commandAddAction` hscolourAction hooks
       , registerCommand `commandAddAction` registerAction hooks
       , unregisterCommand `commandAddAction` unregisterAction hooks
@@ -232,12 +363,12 @@ configureAction hooks flags args = do
 
   let epkg_descr = (pkg_descr0, pbi)
 
-  localbuildinfo0 <- confHook hooks epkg_descr flags'
+  lbi1 <- confHook hooks epkg_descr flags'
 
   -- remember the .cabal filename if we know it
   -- and all the extra command line args
   let localbuildinfo =
-        localbuildinfo0
+        lbi1
           { pkgDescrFile = mb_pd_file
           , extraConfigArgs = args
           }
@@ -669,7 +800,13 @@ getBuildConfig hooks verbosity distPref = do
 -- Cleaning
 
 clean :: PackageDescription -> CleanFlags -> IO ()
-clean pkg_descr flags = do
+clean = clean_setupHooks noCleanHooks
+
+
+clean_setupHooks :: CleanHooks -> PackageDescription -> CleanFlags -> IO ()
+clean_setupHooks
+  (CleanHooks { cleanPackageHook })
+  pkg_descr flags = do
   let distPref = fromFlagOrDefault defaultDistPref $ cleanDistPref flags
   notice verbosity "cleaning..."
 
@@ -686,6 +823,10 @@ clean pkg_descr flags = do
 
   -- Any extra files the user wants to remove
   traverse_ removeFileOrDirectory (extraTmpFiles pkg_descr)
+
+  -- Run clean setup hook (if any)
+  for_ cleanPackageHook $ \ cleanPkg ->
+    cleanPkg pkg_descr flags
 
   -- If the user wanted to save the config, write it back
   traverse_ (writePersistBuildConfig distPref) maybeConfig
@@ -712,10 +853,10 @@ simpleUserHooks =
     , buildHook = defaultBuildHook
     , replHook = defaultReplHook
     , copyHook = \desc lbi _ f -> install desc lbi f
-    , -- 'install' has correct 'copy' behavior with params
-      testHook = defaultTestHook
-    , benchHook = defaultBenchHook
+      -- 'install' has correct 'copy' behavior with params
     , instHook = defaultInstallHook
+    , testHook = defaultTestHook
+    , benchHook = defaultBenchHook
     , cleanHook = \p _ _ f -> clean p f
     , hscolourHook = \p l h f -> hscolour p l (allSuffixHandlers h) f
     , haddockHook = \p l h f -> haddock p l (allSuffixHandlers h) f
@@ -840,14 +981,24 @@ defaultInstallHook
   -> UserHooks
   -> InstallFlags
   -> IO ()
-defaultInstallHook pkg_descr localbuildinfo _ flags = do
+defaultInstallHook =
+  defaultInstallHook_setupHooks SetupHooks.noCopyHooks
+
+defaultInstallHook_setupHooks
+  :: SetupHooks.CopyHooks
+  -> PackageDescription
+  -> LocalBuildInfo
+  -> UserHooks
+  -> InstallFlags
+  -> IO ()
+defaultInstallHook_setupHooks copy_hooks pkg_descr localbuildinfo _ flags = do
   let copyFlags =
         defaultCopyFlags
           { copyDistPref = installDistPref flags
           , copyDest = installDest flags
           , copyVerbosity = installVerbosity flags
           }
-  install pkg_descr localbuildinfo copyFlags
+  install_setupHooks copy_hooks pkg_descr localbuildinfo copyFlags
   let registerFlags =
         defaultRegisterFlags
           { regDistPref = installDistPref flags
@@ -855,7 +1006,8 @@ defaultInstallHook pkg_descr localbuildinfo _ flags = do
           , regPackageDB = installPackageDB flags
           , regVerbosity = installVerbosity flags
           }
-  when (hasLibs pkg_descr) $ register pkg_descr localbuildinfo registerFlags
+  when (hasLibs pkg_descr) $
+    register pkg_descr localbuildinfo registerFlags
 
 defaultBuildHook
   :: PackageDescription

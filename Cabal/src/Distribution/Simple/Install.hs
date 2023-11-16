@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 
 -----------------------------------------------------------------------------
@@ -16,7 +17,7 @@
 -- place based on the prefix argument. It does the generic bits and then calls
 -- compiler-specific functions to do the rest.
 module Distribution.Simple.Install
-  ( install
+  ( install, install_setupHooks
   , installFileGlob
   ) where
 
@@ -45,6 +46,8 @@ import Distribution.Simple.Flag
   )
 import Distribution.Simple.Glob (matchDirFileGlob)
 import Distribution.Simple.LocalBuildInfo
+import Distribution.Simple.SetupHooks.Internal
+  ( CopyHooks(..), noCopyHooks )
 import Distribution.Simple.Setup.Copy
   ( CopyFlags (..)
   )
@@ -99,17 +102,34 @@ install
   -> CopyFlags
   -- ^ flags sent to copy or install
   -> IO ()
-install pkg_descr lbi flags = do
+install = install_setupHooks noCopyHooks
+
+install_setupHooks
+  :: CopyHooks
+  -> PackageDescription
+  -- ^ information from the .cabal file
+  -> LocalBuildInfo
+  -- ^ information from the configure step
+  -> CopyFlags
+  -- ^ flags sent to copy or install
+  -> IO ()
+install_setupHooks
+  (CopyHooks { preCopyComponentHook, postCopyComponentHook })
+  pkg_descr lbi flags = do
   checkHasLibsOrExes
   targets <- readTargetInfos verbosity pkg_descr lbi (copyArgs flags)
 
   copyPackage verbosity pkg_descr lbi distPref copydest
 
   -- It's not necessary to do these in build-order, but it's harmless
-  withNeededTargetsInBuildOrder' pkg_descr lbi (map nodeKey targets) $ \target ->
+  withNeededTargetsInBuildOrder' pkg_descr lbi (map nodeKey targets) $ \target -> do
     let comp = targetComponent target
         clbi = targetCLBI target
-     in copyComponent verbosity pkg_descr lbi comp clbi copydest
+    for_ preCopyComponentHook $ \ pre_copy ->
+      pre_copy lbi flags target
+    copyComponent verbosity pkg_descr lbi comp clbi copydest
+    for_ postCopyComponentHook $ \ post_copy ->
+      post_copy lbi flags target
   where
     distPref = fromFlag (copyDistPref flags)
     verbosity = fromFlag (copyVerbosity flags)

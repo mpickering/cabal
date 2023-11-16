@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -----------------------------------------------------------------------------
 
 -- Module      :  Distribution.Simple.Errors
@@ -14,6 +16,12 @@ module Distribution.Simple.Errors
   , FailedDependency (..)
   , exceptionCode
   , exceptionMessage
+
+  -- * SetupHooks errors
+  -- TODO: move this out.
+  , SetupHooksException(..)
+  , CannotApplyComponentDiffReason(..)
+  , IllegalComponentDiffReason(..)
   ) where
 
 import Distribution.Compat.Prelude
@@ -21,19 +29,18 @@ import Distribution.Compiler
 import Distribution.InstalledPackageInfo
 import Distribution.ModuleName
 import Distribution.Package
-import Distribution.PackageDescription (FlagName, UnqualComponentName)
+import Distribution.PackageDescription
 import Distribution.Pretty
   ( Pretty (pretty)
   , prettyShow
   )
 import Distribution.Simple.InstallDirs
 import Distribution.System (OS)
-import Distribution.Types.BenchmarkType
-import Distribution.Types.LibraryName
-import Distribution.Types.PkgconfigVersion
-import Distribution.Types.TestType
+import Distribution.Types.Component
 import Distribution.Version
 import Text.PrettyPrint
+
+import qualified Data.List.NonEmpty as NE
 
 data FailedDependency
   = DependencyNotExists PackageName
@@ -144,6 +151,7 @@ data CabalException
   | CheckPackageProblems [String]
   | LibDirDepsPrefixNotRelative FilePath FilePath
   | CombinedConstraints Doc
+  | SetupHooksException SetupHooksException
   deriving (Show, Typeable)
 
 exceptionCode :: CabalException -> Int
@@ -249,6 +257,8 @@ exceptionCode e = case e of
   CheckPackageProblems{} -> 5559
   LibDirDepsPrefixNotRelative{} -> 6667
   CombinedConstraints{} -> 5000
+  SetupHooksException err ->
+    setupHooksExceptionCode err
 
 exceptionMessage :: CabalException -> String
 exceptionMessage e = case e of
@@ -259,7 +269,7 @@ exceptionMessage e = case e of
   NoLibraryFound -> "No executables and no library found. Nothing to do."
   CompilerNotInstalled compilerFlavor -> "installing with " ++ prettyShow compilerFlavor ++ "is not implemented"
   CantFindIncludeFile file -> "can't find include file " ++ file
-  UnsupportedTestSuite testType -> "Unsupported test suite type: " ++ testType
+  UnsupportedTestSuite test_type -> "Unsupported test suite type: " ++ test_type
   UnsupportedBenchMark benchMarkType -> "Unsupported benchmark type: " ++ benchMarkType
   NoIncludeFileFound f -> "can't find include file " ++ f
   NoModuleFound m suffixes ->
@@ -301,7 +311,7 @@ exceptionMessage e = case e of
   FailedToDetermineTarget -> "Failed to determine target."
   NoMultipleTargets -> "The 'repl' command does not support multiple targets at once."
   REPLNotSupported -> "A REPL is not supported with this compiler."
-  NoSupportBuildingTestSuite testType -> "No support for building test suite type " ++ show testType
+  NoSupportBuildingTestSuite test_type -> "No support for building test suite type " ++ show test_type
   NoSupportBuildingBenchMark benchMarkType -> "No support for building benchmark type " ++ show benchMarkType
   BuildingNotSupportedWithCompiler -> "Building is not supported with this compiler."
   ProvideHaskellSuiteTool msg -> show msg
@@ -645,3 +655,69 @@ exceptionMessage e = case e of
       text "The following package dependencies were requested"
         $+$ nest 4 dispDepend
         $+$ text "however the given installed package instance does not exist."
+  SetupHooksException err ->
+    setupHooksExceptionMessage err
+
+--------------------------------------------------------------------------------
+-- TODO: move this to a separate module.
+
+data SetupHooksException
+  -- | Cannot apply a diff to a component in a per-component configure hook.
+  = CannotApplyComponentDiff CannotApplyComponentDiffReason
+  deriving Show
+
+data CannotApplyComponentDiffReason
+  = MismatchedComponentTypes Component Component
+  | IllegalComponentDiff (NE.NonEmpty IllegalComponentDiffReason)
+  deriving Show
+
+data IllegalComponentDiffReason
+  = CannotChangeName
+  | CannotChangeComponentField String
+  | CannotChangeBuildInfoField String
+  deriving Show
+
+setupHooksExceptionCode :: SetupHooksException -> Int
+setupHooksExceptionCode = \case
+  CannotApplyComponentDiff rea ->
+    cannotApplyComponentDiffCode rea
+
+setupHooksExceptionMessage :: SetupHooksException -> String
+setupHooksExceptionMessage = \case
+  CannotApplyComponentDiff reason ->
+    cannotApplyComponentDiffMessage reason
+
+cannotApplyComponentDiffCode :: CannotApplyComponentDiffReason -> Int
+cannotApplyComponentDiffCode = \case
+  MismatchedComponentTypes {} -> 9491
+  IllegalComponentDiff {} -> 7634
+
+cannotApplyComponentDiffMessage :: CannotApplyComponentDiffReason -> String
+cannotApplyComponentDiffMessage = \case
+  MismatchedComponentTypes comp diff ->
+    unlines
+      [ "Mismatched component types in per-component configure hook."
+      , "Trying to apply a " ++ what ++ " diff to " ++ showComponentName (componentName comp) ++ "."
+      ]
+    where
+      what = case diff of
+        CLib {} -> "library"
+        CFLib {} -> "foreign library"
+        CExe {} -> "executable"
+        CTest {} -> "testsuite"
+        CBench {} -> "benchmark"
+  IllegalComponentDiff reasons ->
+    unlines
+      ("Illegal component diff in per-component configure hook:"
+      : map mk_rea (NE.toList reasons))
+    where
+      mk_rea err = "  - " ++ illegalComponentDiffMessage err ++ "."
+
+illegalComponentDiffMessage :: IllegalComponentDiffReason -> String
+illegalComponentDiffMessage = \case
+  CannotChangeName ->
+    "cannot change the name of a component"
+  CannotChangeComponentField fld ->
+    "cannot change component field '" ++ fld ++ "'"
+  CannotChangeBuildInfoField fld ->
+    "cannot change BuildInfo field '" ++ fld ++ "'"

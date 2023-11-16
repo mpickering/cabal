@@ -20,9 +20,9 @@
 -- The @hscolour@ support allows generating HTML versions of the original
 -- source, with coloured syntax highlighting.
 module Distribution.Simple.Haddock
-  ( haddock
+  ( haddock, haddock_setupHooks
   , createHaddockIndex
-  , hscolour
+  , hscolour, hscolour_setupHooks
   , haddockPackagePaths
   , Visibility (..)
   ) where
@@ -59,6 +59,8 @@ import Distribution.Simple.Program.GHC
 import qualified Distribution.Simple.Program.HcPkg as HcPkg
 import Distribution.Simple.Program.ResponseFile
 import Distribution.Simple.Register
+import Distribution.Simple.SetupHooks.Internal
+  ( BuildingWhat(..), BuildHooks(..), noBuildHooks )
 import Distribution.Simple.Setup.Haddock
 import Distribution.Simple.Setup.Hscolour
 import Distribution.Simple.Utils
@@ -211,7 +213,18 @@ haddock
   -> [PPSuffixHandler]
   -> HaddockFlags
   -> IO ()
-haddock pkg_descr _ _ haddockFlags
+haddock = haddock_setupHooks noBuildHooks
+
+haddock_setupHooks
+  :: BuildHooks
+  -> PackageDescription
+  -> LocalBuildInfo
+  -> [PPSuffixHandler]
+  -> HaddockFlags
+  -> IO ()
+haddock_setupHooks
+  _
+  pkg_descr _ _ haddockFlags
   | not (hasLibs pkg_descr)
       && not (fromFlag $ haddockExecutables haddockFlags)
       && not (fromFlag $ haddockTestSuites haddockFlags)
@@ -221,7 +234,9 @@ haddock pkg_descr _ _ haddockFlags
         "No documentation was generated as this package does not contain "
           ++ "a library. Perhaps you want to use the --executables, --tests,"
           ++ " --benchmarks or --foreign-libraries flags."
-haddock pkg_descr lbi suffixes flags' = do
+haddock_setupHooks
+  (BuildHooks { preBuildComponentHook, postBuildComponentHook })
+  pkg_descr lbi suffixes flags' = do
   let verbosity = flag haddockVerbosity
       comp = compiler lbi
       platform = hostPlatform lbi
@@ -273,6 +288,10 @@ haddock pkg_descr lbi suffixes flags' = do
   let using_hscolour = flag haddockLinkedSource && version < mkVersion [2, 17]
   when using_hscolour $
     hscolour'
+      noBuildHooks
+        -- NB: we are not passing the user BuildHooks here,
+        -- because we are already running the pre/post build hooks
+        -- for Haddock.
       (warn verbosity)
       haddockTarget
       pkg_descr
@@ -295,7 +314,9 @@ haddock pkg_descr lbi suffixes flags' = do
     let component = targetComponent target
         clbi = targetCLBI target
 
-    preBuildComponent verbosity lbi target
+    preBuildComponent
+      (fmap ($ BuildHaddock flags) preBuildComponentHook)
+      verbosity lbi target
 
     let
       lbi' =
@@ -344,7 +365,7 @@ haddock pkg_descr lbi suffixes flags' = do
           (packageId pkg_descr)
           (componentLocalName clbi)
           (maybeComponentInstantiatedWith clbi)
-    case component of
+    ipi <- case component of
       CLib lib -> do
         withTempDirectoryEx verbosity tmpFileOpts (buildDir lbi) "tmp" $
           \tmp -> do
@@ -412,6 +433,11 @@ haddock pkg_descr lbi suffixes flags' = do
       CExe _ -> when (flag haddockExecutables) (smsg >> doExe component) >> return index
       CTest _ -> when (flag haddockTestSuites) (smsg >> doExe component) >> return index
       CBench _ -> when (flag haddockBenchmarks) (smsg >> doExe component) >> return index
+
+    for_ postBuildComponentHook $ \ postBuild ->
+      postBuild (BuildHaddock flags) lbi target
+
+    return ipi
 
   for_ (extraDocFiles pkg_descr) $ \fpath -> do
     files <- matchDirFileGlob verbosity (specVersion pkg_descr) "." fpath
@@ -1105,10 +1131,21 @@ hscolour
   -> [PPSuffixHandler]
   -> HscolourFlags
   -> IO ()
-hscolour = hscolour' dieNoVerbosity ForDevelopment
+hscolour = hscolour_setupHooks noBuildHooks
+
+hscolour_setupHooks
+  :: BuildHooks
+  -> PackageDescription
+  -> LocalBuildInfo
+  -> [PPSuffixHandler]
+  -> HscolourFlags
+  -> IO ()
+hscolour_setupHooks setupHooks =
+  hscolour' setupHooks dieNoVerbosity ForDevelopment
 
 hscolour'
-  :: (String -> IO ())
+  :: BuildHooks
+  -> (String -> IO ())
   -- ^ Called when the 'hscolour' exe is not found.
   -> HaddockTarget
   -> PackageDescription
@@ -1116,7 +1153,9 @@ hscolour'
   -> [PPSuffixHandler]
   -> HscolourFlags
   -> IO ()
-hscolour' onNoHsColour haddockTarget pkg_descr lbi suffixes flags =
+hscolour'
+  (BuildHooks { preBuildComponentHook, postBuildComponentHook })
+  onNoHsColour haddockTarget pkg_descr lbi suffixes flags =
   either onNoHsColour (\(hscolourProg, _, _) -> go hscolourProg)
     =<< lookupProgramVersion
       verbosity
@@ -1137,7 +1176,9 @@ hscolour' onNoHsColour haddockTarget pkg_descr lbi suffixes flags =
 
       withAllComponentsInBuildOrder pkg_descr lbi $ \comp clbi -> do
         let tgt = TargetInfo clbi comp
-        preBuildComponent verbosity lbi tgt
+        preBuildComponent
+          (fmap ($ BuildHscolour flags) preBuildComponentHook)
+          verbosity lbi tgt
         preprocessComponent pkg_descr comp lbi clbi False verbosity suffixes
         let
           doExe com = case (compToExe com) of
@@ -1165,6 +1206,8 @@ hscolour' onNoHsColour haddockTarget pkg_descr lbi suffixes flags =
           CExe _ -> when (fromFlag (hscolourExecutables flags)) $ doExe comp
           CTest _ -> when (fromFlag (hscolourTestSuites flags)) $ doExe comp
           CBench _ -> when (fromFlag (hscolourBenchmarks flags)) $ doExe comp
+        for_ postBuildComponentHook $ \ postBuild ->
+          postBuild (BuildHscolour flags) lbi tgt
 
     stylesheet = flagToMaybe (hscolourCSS flags)
 

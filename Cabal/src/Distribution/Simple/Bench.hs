@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 
 -----------------------------------------------------------------------------
@@ -15,7 +16,7 @@
 -- package. It performs the \"@.\/setup bench@\" action. It runs
 -- benchmarks designated in the package description.
 module Distribution.Simple.Bench
-  ( bench
+  ( bench, bench_setupHooks
   ) where
 
 import Distribution.Compat.Prelude
@@ -28,6 +29,8 @@ import Distribution.Simple.Compiler
 import Distribution.Simple.Flag (fromFlag)
 import Distribution.Simple.InstallDirs
 import qualified Distribution.Simple.LocalBuildInfo as LBI
+import Distribution.Simple.SetupHooks.Internal
+  ( BenchmarkHooks(..), noBenchmarkHooks )
 import Distribution.Simple.Setup.Benchmark
 import Distribution.Simple.UserHooks
 import Distribution.Simple.Utils
@@ -49,16 +52,37 @@ bench
   -> BenchmarkFlags
   -- ^ flags sent to benchmark
   -> IO ()
-bench args pkg_descr lbi flags = do
+bench = bench_setupHooks noBenchmarkHooks
+
+bench_setupHooks
+  :: BenchmarkHooks
+  -> Args
+  -- ^ positional command-line arguments
+  -> PD.PackageDescription
+  -- ^ information from the .cabal file
+  -> LBI.LocalBuildInfo
+  -- ^ information from the configure step
+  -> BenchmarkFlags
+  -- ^ flags sent to benchmark
+  -> IO ()
+bench_setupHooks
+  (BenchmarkHooks
+    { preBenchPackageHook, preBenchComponentHook
+    , postBenchComponentHook, postBenchPackageHook })
+  args pkg_descr lbi flags = do
   let verbosity = fromFlag $ benchmarkVerbosity flags
       benchmarkNames = args
       pkgBenchmarks = PD.benchmarks pkg_descr
-      enabledBenchmarks = map fst (LBI.enabledBenchLBIs pkg_descr lbi)
+      enabledBenchmarks = LBI.enabledBenchLBIs pkg_descr lbi
 
       -- Run the benchmark
-      doBench :: PD.Benchmark -> IO ExitCode
-      doBench bm =
-        case PD.benchmarkInterface bm of
+      doBench :: (PD.Benchmark, LBI.ComponentLocalBuildInfo) -> IO ExitCode
+      doBench (bm, clbi) = do
+
+        for_ preBenchComponentHook $ \ preBench ->
+          preBench args lbi flags bm clbi
+
+        benchRes <- case PD.benchmarkInterface bm of
           PD.BenchmarkExeV10 _ _ -> do
             let cmd = LBI.buildDir lbi </> name </> name <.> exeExtension (LBI.hostPlatform lbi)
                 options =
@@ -84,8 +108,16 @@ bench args pkg_descr lbi flags = do
                 ++ " of type: "
                 ++ prettyShow (PD.benchmarkType bm)
             exitFailure
+
+        for_ postBenchComponentHook $ \ postBench ->
+          postBench args lbi flags bm clbi
+
+        return benchRes
         where
           name = unUnqualComponentName $ PD.benchmarkName bm
+
+  for_ preBenchPackageHook $ \ preBench ->
+    preBench args lbi flags
 
   unless (PD.hasBenchmarks pkg_descr) $ do
     notice verbosity "Package has no benchmarks."
@@ -98,7 +130,7 @@ bench args pkg_descr lbi flags = do
     [] -> return enabledBenchmarks
     names -> for names $ \bmName ->
       let benchmarkMap = zip enabledNames enabledBenchmarks
-          enabledNames = map PD.benchmarkName enabledBenchmarks
+          enabledNames = map (PD.benchmarkName . fst) enabledBenchmarks
           allNames = map PD.benchmarkName pkgBenchmarks
        in case lookup (mkUnqualComponentName bmName) benchmarkMap of
             Just t -> return t
@@ -110,6 +142,10 @@ bench args pkg_descr lbi flags = do
   let totalBenchmarks = length bmsToRun
   notice verbosity $ "Running " ++ show totalBenchmarks ++ " benchmarks..."
   exitcodes <- traverse doBench bmsToRun
+
+  for_ postBenchPackageHook $ \ postBench ->
+    postBench args lbi flags
+
   let allOk = totalBenchmarks == length (filter (== ExitSuccess) exitcodes)
   unless allOk exitFailure
   where
