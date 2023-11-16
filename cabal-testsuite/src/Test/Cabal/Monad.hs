@@ -37,6 +37,7 @@ module Test.Cabal.Monad (
     testKeysDir,
     testSourceCopyDir,
     testCabalDir,
+    testStoreDir,
     testUserCabalConfigFile,
     testActualFile,
     -- * Skipping tests
@@ -338,7 +339,8 @@ runTestM mode m = withSystemTempDirectory "cabal-testsuite" $ \tmp_dir -> do
                     testPlan = Nothing,
                     testRecordDefaultMode = DoNotRecord,
                     testRecordUserMode = Nothing,
-                    testSourceCopyRelativeDir = "source"
+                    testSourceCopyRelativeDir = "source",
+                    testMaybeStoreDir = Nothing
                 }
     let go = do cleanup
                 r <- m
@@ -473,6 +475,7 @@ data TestEnv = TestEnv
       testSourceDir     :: FilePath
     -- | Somewhere to stow temporary files needed by the test.
     , testTmpDir        :: FilePath
+
     -- | Test sub-name, used to qualify dist/database directory to avoid
     -- conflicts.
     , testSubName       :: String
@@ -532,6 +535,8 @@ data TestEnv = TestEnv
     -- | Name of the subdirectory we copied the test's sources to,
     -- relative to 'testSourceDir'
     , testSourceCopyRelativeDir :: FilePath
+    -- | Path to the storedir used by the test, if not the default
+    , testMaybeStoreDir      :: Maybe FilePath
     }
     deriving Show
 
@@ -610,6 +615,11 @@ testSourceCopyDir env = testWorkDir env </> testSourceCopyRelativeDir env
 -- | The user cabal directory
 testCabalDir :: TestEnv -> FilePath
 testCabalDir env = testHomeDir env </> ".cabal"
+
+testStoreDir :: TestEnv -> FilePath
+testStoreDir env = case testMaybeStoreDir env of
+                      Just dir -> dir
+                      Nothing -> testCabalDir env </> "store"
 
 -- | The user cabal config file
 testUserCabalConfigFile :: TestEnv -> FilePath
