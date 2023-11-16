@@ -65,6 +65,7 @@ module Distribution.Simple
     -- ** Standard sets of hooks
   , simpleUserHooks
   , autoconfUserHooks
+  , autoconfSetupHooks
   , emptyUserHooks
   ) where
 
@@ -100,15 +101,18 @@ import Distribution.Pretty
 import Distribution.Simple.Bench
 import Distribution.Simple.BuildPaths
 import Distribution.Simple.ConfigureScript ( runConfigureScript )
+import qualified Distribution.Simple.ConfigureScript as Conf
 import Distribution.Simple.Errors
 import Distribution.Simple.Haddock
 import Distribution.Simple.Install
 import Distribution.Simple.LocalBuildInfo
 import Distribution.Simple.SetupHooks.Internal
-  ( SetupHooks )
+  ( SetupHooks, noSetupHooks )
 import qualified Distribution.Simple.SetupHooks.Internal as SetupHooks
 import Distribution.Simple.Test
 import Distribution.Simple.Utils
+import qualified Distribution.Types.LocalBuildConfig as LBC
+import Distribution.Types.LocalBuildInfo (buildDirPBD)
 import Distribution.Verbosity
 import Distribution.Version
 import Language.Haskell.Extension
@@ -869,6 +873,70 @@ simpleUserHooks =
       where
         verbosity = fromFlag (configVerbosity flags)
 
+autoconfSetupHooks :: SetupHooks
+autoconfSetupHooks =
+  noSetupHooks
+    { SetupHooks.configureHooks =
+      SetupHooks.noConfigureHooks
+        { SetupHooks.postConfPackageHook  = Just post_conf_pkg
+        , SetupHooks.preConfComponentHook = Just pre_conf_comp
+        }
+    }
+  where
+    post_conf_pkg
+      :: LBC.LocalBuildConfig
+      -> LBC.PackageBuildDescr
+      -> IO ()
+    post_conf_pkg
+      (LBC.LocalBuildConfig { LBC.withPrograms = progs })
+      (LBC.PackageBuildDescr
+        { LBC.configFlags    = cfg
+        , LBC.flagAssignment = flags
+        , LBC.hostPlatform   = plat
+        }) = do
+      let cfg_env =
+            Conf.ConfigEnv
+              { Conf.configFlags    = cfg
+              , Conf.programDb      = progs
+              , Conf.flagAssignment = flags
+              , Conf.hostPlatform   = plat
+              }
+          verbosity = Conf.configEnvVerbosity cfg_env
+          baseDir = Conf.configEnvBaseDir cfg_env
+
+      confExists <- doesFileExist $ baseDir </> "configure"
+      if confExists
+      then
+        runConfigureScript
+          verbosity
+          cfg_env
+      else dieWithException verbosity ConfigureScriptNotFound
+
+    pre_conf_comp
+      :: LBC.LocalBuildConfig
+      -> LBC.PackageBuildDescr
+      -> Component
+      -> IO SetupHooks.ComponentDiff
+    pre_conf_comp
+      _lbc
+      pbd@(LBC.PackageBuildDescr { LBC.configFlags = cfg })
+      component = do
+      let verbosity = fromFlag (configVerbosity cfg)
+
+      -- Read the ".buildinfo" file and use that to update
+      -- the components (main library + executables only).
+      hbi <- getHookedBuildInfo verbosity $ buildDirPBD pbd
+      -- SetupHooks TODO: we are reading getHookedBuildInfo once
+      -- for each component. I think this is inherent to the SetupHooks
+      -- approach.
+      let comp_name = componentName component
+      fromMaybe (return $ SetupHooks.emptyComponentDiff comp_name) $
+        SetupHooks.hookedBuildInfoComponentDiff_maybe hbi comp_name
+      -- SetupHooks TODO: we are missing the sanity check that all of the
+      -- components described in the .buildinfo actually exist in the package.
+      -- Currently, we will just silently not do anything if the .buildinfo
+      -- contains additional components that don't exist in the package description.
+
 -- | Basic autoconf 'UserHooks':
 --
 -- * 'postConf' runs @.\/configure@, if present.
@@ -880,6 +948,8 @@ simpleUserHooks =
 -- Thus @configure@ can use local system information to generate
 -- /package/@.buildinfo@ and possibly other files.
 autoconfUserHooks :: UserHooks
+-- SetupHooks TODO: remove this and migrate the documentation
+-- to the replacement, autoconfSetupHooks.
 autoconfUserHooks =
   simpleUserHooks
     { postConf = defaultPostConf
@@ -902,18 +972,24 @@ autoconfUserHooks =
     defaultPostConf args flags pkg_descr lbi =
       do
         let verbosity = fromFlag (configVerbosity flags)
-            baseDir lbi' =
+            baseDir =
               fromMaybe
                 ""
-                (takeDirectory <$> cabalFilePath lbi')
-        confExists <- doesFileExist $ (baseDir lbi) </> "configure"
+                (takeDirectory <$> cabalFilePath lbi)
+            -- SetupHooks TODO: move this convenience function out of here.
+            configEnv :: Conf.ConfigEnv
+            configEnv = Conf.ConfigEnv
+              { Conf.configFlags = flags
+              , Conf.hostPlatform = hostPlatform lbi
+              , Conf.programDb = withPrograms lbi
+              , Conf.flagAssignment = flagAssignment lbi }
+        confExists <- doesFileExist $ baseDir </> "configure"
         if confExists
-          then
-            runConfigureScript
-              verbosity
-              flags
-              lbi
-          else dieWithException verbosity ConfigureScriptNotFound
+        then
+          runConfigureScript
+            verbosity
+            configEnv
+        else dieWithException verbosity ConfigureScriptNotFound
 
         pbi <- getHookedBuildInfo verbosity (buildDir lbi)
         sanityCheckHookedBuildInfo verbosity pkg_descr pbi

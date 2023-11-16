@@ -525,8 +525,8 @@ internalSetupMethod verbosity options bt args = do
 buildTypeAction :: BuildType -> ([String] -> IO ())
 buildTypeAction Simple = Simple.defaultMainArgs
 buildTypeAction Configure =
-  Simple.defaultMainWithHooksArgs
-    Simple.autoconfUserHooks
+  Simple.defaultMainWithSetupHooksArgs
+    Simple.autoconfSetupHooks
 buildTypeAction Make = Make.defaultMainArgs
 buildTypeAction Hooks  = error "buildTypeAction Hooks"
 buildTypeAction Custom = error "buildTypeAction Custom"

@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
@@ -15,6 +16,9 @@
 -- Portability :  portable
 module Distribution.Simple.ConfigureScript
   ( runConfigureScript
+  , ConfigEnv(..)
+  , configEnvBuildDir, configEnvCabalFilePath
+  , configEnvVerbosity, configEnvBaseDir
   ) where
 
 import Distribution.Compat.Prelude
@@ -24,13 +28,12 @@ import Prelude ()
 import Distribution.PackageDescription
 import Distribution.Pretty
 import Distribution.Simple.Errors
-import Distribution.Simple.LocalBuildInfo
 import Distribution.Simple.Program
 import Distribution.Simple.Program.Db
 import Distribution.Simple.Setup.Common
 import Distribution.Simple.Setup.Config
 import Distribution.Simple.Utils
-import Distribution.System (buildPlatform)
+import Distribution.System (Platform, buildPlatform)
 import Distribution.Utils.NubList
 import Distribution.Verbosity
 
@@ -52,14 +55,18 @@ import Distribution.Compat.GetShortPathName (getShortPathName)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map as Map
 
+--------------------------------------------------------------------------------
+
 runConfigureScript
   :: Verbosity
-  -> ConfigFlags
-  -> LocalBuildInfo
+  -> ConfigEnv
   -> IO ()
-runConfigureScript verbosity flags lbi = do
+runConfigureScript verbosity
+  cfg_env@(ConfigEnv { configFlags = cfgFlags
+                     , programDb, flagAssignment, hostPlatform }) = do
+  let buildDir = configEnvBuildDir cfg_env
+      cabalFilePath = configEnvCabalFilePath cfg_env
   env <- getEnvironment
-  let programDb = withPrograms lbi
   (ccProg, ccFlags) <- configureCCompiler verbosity programDb
   ccProgShort <- getShortPathName ccProg
   -- The C compiler's compilation and linker flags (e.g.
@@ -70,7 +77,7 @@ runConfigureScript verbosity flags lbi = do
   -- a way to pass its flags too
   configureFile <-
     makeAbsolute $
-      fromMaybe "." (takeDirectory <$> cabalFilePath lbi) </> "configure"
+      fromMaybe "." (takeDirectory <$> cabalFilePath) </> "configure"
   -- autoconf is fussy about filenames, and has a set of forbidden
   -- characters that can't appear in the build directory, etc:
   -- https://www.gnu.org/software/autoconf/manual/autoconf.html#File-System-Conventions
@@ -116,7 +123,7 @@ runConfigureScript verbosity flags lbi = do
       Map.fromListWith
         (<>)
         [ (flagEnvVar flag, (flag, bool) :| [])
-        | (flag, bool) <- unFlagAssignment $ flagAssignment lbi
+        | (flag, bool) <- unFlagAssignment flagAssignment
         ]
   -- A map from env vars to flag names to the single flag we will go with
   cabalFlagMapDeconflicted :: Map String (FlagName, Bool) <-
@@ -148,10 +155,10 @@ runConfigureScript verbosity flags lbi = do
         ]
           ++ [
                ( "CABAL_FLAGS"
-               , Just $ unwords [showFlagValue fv | fv <- unFlagAssignment $ flagAssignment lbi]
+               , Just $ unwords [showFlagValue fv | fv <- unFlagAssignment flagAssignment ]
                )
              ]
-  let extraPath = fromNubList $ configProgramPathExtra flags
+  let extraPath = fromNubList $ configProgramPathExtra cfgFlags
   let cflagsEnv =
         maybe (unwords ccFlags) (++ (" " ++ unwords ccFlags)) $
           lookup "CFLAGS" env
@@ -165,8 +172,9 @@ runConfigureScript verbosity flags lbi = do
         ("CFLAGS", Just cflagsEnv)
           : [("PATH", Just pathEnv) | not (null extraPath)]
           ++ cabalFlagEnv
-      hp = hostPlatform lbi
-      maybeHostFlag = if hp == buildPlatform then [] else ["--host=" ++ show (pretty hp)]
+      maybeHostFlag = if hostPlatform == buildPlatform
+                      then []
+                      else ["--host=" ++ show (pretty hostPlatform)]
       args' = configureFile' : args ++ ["CC=" ++ ccProgShort] ++ maybeHostFlag
       shProg = simpleProgram "sh"
       progDb =
@@ -177,14 +185,15 @@ runConfigureScript verbosity flags lbi = do
     lookupProgram shProg
       `fmap` configureProgram verbosity shProg progDb
   case shConfiguredProg of
-    Just sh ->
+    Just sh -> do
+      let sh' = sh { programOverrideEnv = overEnv }
       runProgramInvocation verbosity $
-        (programInvocation (sh{programOverrideEnv = overEnv}) args')
-          { progInvokeCwd = Just (buildDir lbi)
+        (programInvocation sh' args')
+          { progInvokeCwd = Just buildDir
           }
     Nothing -> dieWithException verbosity NotFoundMsg
   where
-    args = configureArgs backwardsCompatHack flags
+    args = configureArgs backwardsCompatHack cfgFlags
     backwardsCompatHack = False
 
 -- | Convert Windows path to Unix ones
@@ -224,3 +233,30 @@ badAutoconfCharacters =
   , ('`', "backtick")
   , ('|', "pipe")
   ]
+
+-- | Information needed for 'runConfigureScript'.
+data ConfigEnv
+  = ConfigEnv
+  { configFlags    :: ConfigFlags
+  , programDb      :: ProgramDb
+  , flagAssignment :: FlagAssignment
+  , hostPlatform   :: Platform
+  }
+
+configEnvBuildDir :: ConfigEnv -> FilePath
+configEnvBuildDir (ConfigEnv { configFlags = cfg })
+  = fromFlag (configDistPref cfg) </> "build"
+
+configEnvCabalFilePath :: ConfigEnv -> Maybe FilePath
+configEnvCabalFilePath (ConfigEnv { configFlags = cfg })
+  = flagToMaybe (configCabalFilePath cfg)
+
+configEnvVerbosity :: ConfigEnv -> Verbosity
+configEnvVerbosity (ConfigEnv { configFlags = cfg })
+  = fromFlag (configVerbosity cfg)
+
+configEnvBaseDir :: ConfigEnv -> FilePath
+configEnvBaseDir cfg_env =
+  fromMaybe
+    ""
+    (takeDirectory <$> configEnvCabalFilePath cfg_env)
