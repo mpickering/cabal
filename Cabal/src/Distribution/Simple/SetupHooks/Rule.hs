@@ -185,6 +185,9 @@ data Rule
     -- it will pass these locations as the first argument to the action.
     , results :: !(NE.NonEmpty Location)
     -- ^ Results of this rule; see t'Result'.
+    --
+    -- When the build system executes the action associated to this rule,
+    -- it will pass these locations as the second argument to the action.
     , actionId :: !ActionId
     -- ^ To run this rule, which t'Action' should we execute?
     --
@@ -200,7 +203,7 @@ data Rule
     -- environment passed to the rule.
     --
     -- A value of 'Nothing' means: always re-run the rule when the
-    -- environment passes to it changes.
+    -- environment passed to it changes.
     }
   deriving (Generic, Show)
 
@@ -220,7 +223,8 @@ instance Binary Rule
 instance Structured Rule
 
 -- | A (fully resolved) location of a dependency or result of a rule,
--- consisting of an absolute path and of a file path relative to that base path.
+-- consisting of a base directory and of a file path relative to that base
+-- directory path.
 --
 -- In practice, this will be something like @( dir, toFilePath modName )@,
 -- where:
@@ -269,7 +273,7 @@ newtype Action
         -- \^ Locations of the __dependencies__ of this action,
         -- as declared by the rule that this action is executing.
         -> NE.NonEmpty Location
-        -- \^ Locations in which the __results_ of this action
+        -- \^ Locations in which the __results__ of this action
         -- should be put.
         -> IO ()
     }
@@ -286,8 +290,9 @@ simpleAction f = Action{action = f}
 -- constructor.
 --
 -- Actions are registered using 'registerAction', and rules are registered
--- using 'registerRule'. Additional rule dependencies (whose changes should
--- trigger rule recompilation) are declared using 'declareRuleDependencies'.
+-- using 'registerRule'. One can declare additional monitored files or
+-- directories using 'addRuleMonitors'; a change in these will trigger the
+-- recomputation of all rules.
 --
 -- The @env@ type parameter represents an extra argument, which usually
 -- consists of information known to Cabal such as 'LocalBuildInfo' and

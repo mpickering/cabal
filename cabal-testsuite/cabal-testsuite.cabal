@@ -127,6 +127,7 @@ executable test-runtime-deps
                  directory,
                  Cabal,
                  Cabal-syntax,
+                 Cabal-hooks,
                  filepath,
                  transformers,
                  bytestring,

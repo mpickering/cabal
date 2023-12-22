@@ -90,7 +90,7 @@ module Distribution.Simple.SetupHooks
     -- $rulesAPI
   , RulesM
   , registerRule, registerAction
-  , declareRuleDependencies
+  , addRuleMonitors
 
     -- **** Local name generation for t'ActionId'
   , FreshT
@@ -354,10 +354,9 @@ Rules can declare various kinds of dependencies:
 Rules are considered __out-of-date__ precisely when any of the following
 conditions apply:
 
-  [O1] a file dependency of a rule has changed in some way,
-  [O2] the environment passed to the computation of rules has changed,
-  [O3] there has been a relevant change in the set of files and
+  [O1] there has been a relevant change in the set of files and
        directories monitored by the rules.
+  [O2] the environment passed to the computation of rules has changed,
 
 If the rules are out-of-date, the build system is expected to re-run the
 computation that computes all rules.
@@ -394,7 +393,7 @@ Defining pre-build rules can be done in the following style:
 >   return $ do
 >     -- IO actions allowed here
 >     myData <- liftIO someIOAction
->     declareRuleDependencies [ MonitorDir "someSearchDir" DirContents ]
+>     addRuleMonitors [ MonitorDir "someSearchDir" DirContents ]
 >     registerRule $ simpleRule action1 deps1 outs1
 >     registerRule $ simpleRule action1 deps2 outs2
 >     registerRule $ simpleRule action1 deps3 outs3
@@ -405,10 +404,10 @@ rather than directly using the v'Rules', v'Rule' and v'Action' constructors,
 which insulates us from internal changes to the t'Rules', t'Rule' and t'Action'
 datatypes, respectively.
 
-We use 'declareRuleDependencies' to declare that the collection of rules as a
-whole depends on. In this case, we declare that they depend on the contents of
-the "searchDir" directory. This means that the rules will be computed anew
-whenever the contents of this directory change.
+We use 'addRuleMonitorss' to declare a monitored directory that the collection
+of rules as a whole depends on. In this case, we declare that they depend on the
+contents of the "searchDir" directory. This means that the rules will be
+computed anew whenever the contents of this directory change.
 
 Additional convenience functions are also provided, such as the 'generateModules'
 function which can be used to generate a collection of modules ex nihilo without
@@ -566,19 +565,17 @@ register zeroId succId rule = FreshT $ do
 registerRule :: Monad m => Rule -> RulesT m ()
 registerRule r = Writer.tell ( [r], [] )
 
--- | Declare a dependency for the collection of all rules.
+-- | Declare additional monitored objects for the collection of all rules.
 --
--- When this dependency changes, the rules are re-computed.
-declareRuleDependencies :: Monad m => [ MonitorFileOrDir ] -> RulesT m ()
-declareRuleDependencies mons = Writer.tell ( [], mons )
+-- When these monitored objects change, the rules are re-computed.
+addRuleMonitors :: Monad m => [ MonitorFileOrDir ] -> RulesT m ()
+addRuleMonitors mons = Writer.tell ( [], mons )
 
 -- | Register an action. Returns a unique identifier for that action.
 registerAction :: Action -> FreshT Action ActionId Identity ActionId
 registerAction = register ( ActionId 1 ) ( \ ( ActionId i ) -> ActionId ( i + 1 ) )
 
 -- | Find a file in the given search directories.
---
---
 findFileInDirs :: FilePath -> [FilePath] -> IO (Maybe Location)
 findFileInDirs file dirs =
   findFirstFile

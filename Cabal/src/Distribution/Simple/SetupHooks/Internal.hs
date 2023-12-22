@@ -201,7 +201,7 @@ data PreConfPackageInputs = PreConfPackageInputs
 -- of this datatype.
 data PreConfPackageOutputs = PreConfPackageOutputs
   { buildOptions :: BuildOptions
-  , extraConfiguredPrograms :: ConfiguredProgs
+  , extraConfiguredProgs :: ConfiguredProgs
   }
   deriving (Generic, Show)
 
@@ -215,7 +215,7 @@ noPreConfPackageOutputs :: PreConfPackageInputs -> PreConfPackageOutputs
 noPreConfPackageOutputs (PreConfPackageInputs{localBuildConfig = lbc}) =
   PreConfPackageOutputs
     { buildOptions = LBC.withBuildOptions lbc
-    , extraConfiguredPrograms = Map.empty
+    , extraConfiguredProgs = Map.empty
     }
 
 -- | Package-wide post-configure step.
@@ -347,12 +347,12 @@ instance Semigroup PreConfPkgSemigroup where
           do
             PreConfPackageOutputs
               { buildOptions = opts1
-              , extraConfiguredPrograms = progs1
+              , extraConfiguredProgs = progs1
               } <-
               f1 inputs
             PreConfPackageOutputs
               { buildOptions = opts2
-              , extraConfiguredPrograms = progs2
+              , extraConfiguredProgs = progs2
               } <-
               f2 $
                 PreConfPackageInputs
@@ -370,7 +370,7 @@ instance Semigroup PreConfPkgSemigroup where
             return $
               PreConfPackageOutputs
                 { buildOptions = opts2
-                , extraConfiguredPrograms = progs1 <> progs2
+                , extraConfiguredProgs = progs1 <> progs2
                 }
 
 -- | A newtype to hang off the @Semigroup PreConfComponentHook@ instance.
