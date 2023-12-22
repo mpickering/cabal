@@ -18,6 +18,9 @@ module Distribution.Simple.SetupHooks.Errors
   , CannotApplyComponentDiffReason (..)
   , IllegalComponentDiffReason (..)
   , RulesException (..)
+  , InvalidRuleLocations (..)
+  , InvalidRuleInputLocationReason (..)
+  , InvalidRuleOutputLocationReason (..)
   , setupHooksExceptionCode
   , setupHooksExceptionMessage
   , showLocs
@@ -79,8 +82,31 @@ data RulesException
       -- ^ the invalid index
   | -- | A duplicate 'RuleId' in the construction of pre-build rules.
     DuplicateRuleId !RuleId !Rule !Rule
+  | InvalidLocations
+     (NE.NonEmpty InvalidRuleLocations)
 
 deriving instance Show RulesException
+
+data InvalidRuleLocations
+  = InvalidRuleLocations
+  { invalidRuleLocationsRule :: Rule
+  , invalidRuleLocationsIsDynamic :: Bool
+  , invalidRuleInputLocations :: [(Location, InvalidRuleInputLocationReason)]
+  , invalidRuleOutputLocations :: [(Location, InvalidRuleOutputLocationReason)]
+  } -- invariant: at least one of the lists is non-empty
+
+  deriving (Show)
+
+data InvalidRuleInputLocationReason
+  = InputLocationOutsidePackage
+  | InputLocationNotRelative
+  deriving (Show)
+
+data InvalidRuleOutputLocationReason
+  = OutputLocationOutsidePackage
+  | OutputLocationOutsideDesignatedDir
+  | OutputLocationNotRelative
+  deriving (Show)
 
 data CannotApplyComponentDiffReason
   = MismatchedComponentTypes Component Component
@@ -107,6 +133,7 @@ rulesExceptionCode = \case
   MissingRuleOutputs{} -> 3498
   InvalidRuleOutputIndex{} -> 1173
   DuplicateRuleId{} -> 7717
+  InvalidLocations{} -> 7717
 
 setupHooksExceptionMessage :: SetupHooksException -> String
 setupHooksExceptionMessage = \case
@@ -178,10 +205,32 @@ rulesExceptionMessage = \case
       , "  - " <> showRule r1
       , "  - " <> showRule r2
       ]
-  where
-    showRule :: Rule -> String
-    showRule (Rule{staticDependencies = deps, results = reslts}) =
-      "Rule: " ++ showDeps deps ++ " --> " ++ showLocs (NE.toList reslts)
+  InvalidLocations badRules ->
+    unlines $
+      ("Pre-build rules contain invalid " ++ what ++ " locations :")
+      : map showBadRule badRulesL
+    where
+      badRulesL = NE.toList badRules
+      what
+        | badInputs && badOutputs
+        = "input and output"
+        | badInputs
+        = "input"
+        | otherwise
+        = "output"
+      badInputs = any (not . null . invalidRuleInputLocations) badRulesL
+      badOutputs = any (not . null . invalidRuleOutputLocations) badRulesL
+      showBadRule r =
+        unlines $
+          [ "  - rule dependency " ++ locPath loc ++ " " ++ invalidRuleInputLocationReason rea
+          | (loc, rea) <- invalidRuleInputLocations r ]
+          ++
+          [ "  - rule output " ++ locPath loc ++ " " ++ invalidRuleOutputLocationReason rea
+          | (loc, rea) <- invalidRuleOutputLocations r ]
+
+showRule :: Rule -> String
+showRule (Rule{staticDependencies = deps, results = reslts}) =
+  "Rule: " ++ showDeps deps ++ " --> " ++ showLocs (NE.toList reslts)
 
 locPath :: Location -> String
 locPath (base, fp) = normalise $ base </> fp
@@ -197,6 +246,17 @@ showDep = \case
   RuleDependency (RuleOutput{outputOfRule = rId, outputIndex = i}) ->
     "(" ++ show rId ++ ")[" ++ show i ++ "]"
   FileDependency loc -> locPath loc
+
+invalidRuleInputLocationReason :: InvalidRuleInputLocationReason -> String
+invalidRuleInputLocationReason = \ case
+  InputLocationOutsidePackage -> "lies outside the package structure"
+  InputLocationNotRelative -> "is not a relative path"
+
+invalidRuleOutputLocationReason :: InvalidRuleOutputLocationReason -> String
+invalidRuleOutputLocationReason = \ case
+  OutputLocationOutsidePackage -> "lies outside the package structure"
+  OutputLocationOutsideDesignatedDir -> "lies outside the designated output directories (autogen, build)"
+  OutputLocationNotRelative -> "is not a relative path"
 
 cannotApplyComponentDiffCode :: CannotApplyComponentDiffReason -> Int
 cannotApplyComponentDiffCode = \case

@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
+{-#LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
@@ -467,6 +467,8 @@ registerRule_ i r = void $ registerRule i r
 addRuleMonitors :: Monad m => [MonitorFilePath] -> RulesT m ()
 addRuleMonitors = RulesT . lift . lift . Writer.tell
 {-# INLINEABLE addRuleMonitors #-}
+
+--------------------------------------------------------------------------------
 
 -- | Find a file in the given search directories.
 findFileInDirs :: FilePath -> [FilePath] -> IO (Maybe Location)

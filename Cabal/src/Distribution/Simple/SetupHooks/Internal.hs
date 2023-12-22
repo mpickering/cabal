@@ -4,6 +4,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
@@ -124,7 +125,7 @@ import GHC.Exts (Any)
 import Unsafe.Coerce
 
 import System.Directory (doesFileExist)
-import System.FilePath ((<.>), (</>))
+import System.FilePath ((<.>), (</>), isAbsolute, splitDirectories, normalise)
 
 --------------------------------------------------------------------------------
 -- SetupHooks
@@ -826,8 +827,7 @@ applyComponentDiff verbosity comp (ComponentDiff diff)
 --------------------------------------------------------------------------------
 -- Running pre-processors and code generators
 
--- | Run all preprocessors and code generators specified in
--- 'SetupHooks'.
+-- | Run a collection of fine-grained build rules.
 --
 -- This function should only be called internally within @Cabal@, as it is used
 -- to implement the (legacy) Setup.hs interface. The build tool
@@ -843,16 +843,27 @@ executeRules
   -> IO ()
 executeRules verbosity lbi tgtInfo rulesFromInputs inputs = do
   -- Get all the rules.
-  (allRules, _monitors) <- computeRules verbosity inputs rulesFromInputs
+  (allRules0, _monitors) <- computeRules verbosity inputs rulesFromInputs
+  (badRules, allRules) <-
+    Map.mapEither id <$>
+      traverse (normaliseRule lbi tgtInfo) allRules0
   -- Compute all extra dynamic dependency edges.
-  dynDepsEdges <- flip Map.traverseMaybeWithKey allRules $
-    \_rId (Rule{ruleCommands = cmds}) ->
+  dynDepsEdges0 <- flip Map.traverseMaybeWithKey allRules $
+    \_rId r@(Rule{ruleCommands = cmds}) ->
       case cmds of
         StaticRuleCommand{} -> return Nothing
         DynamicRuleCommands{dynamicDeps = DynDepsCmd{dynDepsCmd = depsCmd}} ->
           do
             (deps, res) <- runCommand depsCmd
-            return $ Just (deps, unsafeCoerce res :: Any)
+            return $ Just (r, deps, unsafeCoerce res :: Any)
+  (badDynDepsEdges, dynDepsEdges) <-
+    Map.mapEither id <$>
+      traverse (normaliseDynDepEdge lbi tgtInfo) dynDepsEdges0
+  -- Throw an error if any rule input/outputs are invalid, e.g.
+  -- refer to files outside of the project.
+  for_ (NE.nonEmpty $ toList badRules ++ toList badDynDepsEdges) $
+    errorOut . InvalidLocations
+
   -- Create a build graph of all the rules, with static and dynamic dependencies
   -- as edges.
   let
@@ -996,6 +1007,128 @@ ruleOutputsLocation (Rule{results = rs}) fp = any (== fp) rs
 -- | Is the file we depend on missing?
 missingDep :: Location -> IO Bool
 missingDep (base, fp) = not <$> doesFileExist (base </> fp)
+
+normaliseRule
+  :: LocalBuildInfo
+  -> TargetInfo
+  -> Rule
+  -> IO ( Either InvalidRuleLocations Rule )
+normaliseRule lbi tgt r@( Rule { staticDependencies = deps, results = reslts }) = do
+  (badDeps, deps') <-
+    partitionEithers <$>
+      traverse (normaliseDependency lbi tgt) deps
+  (badResults, reslts'List) <-
+    partitionEithers <$>
+      traverse (normaliseOutputLocation lbi tgt) (NE.toList reslts)
+  if | null badDeps && null badResults
+     , Just reslts' <- NE.nonEmpty reslts'List
+     -> return $ Right $
+          r { staticDependencies = deps'
+            , results            = reslts' }
+     | otherwise
+     -> return $ Left $
+          InvalidRuleLocations
+            { invalidRuleLocationsRule = r
+            , invalidRuleLocationsIsDynamic = False
+            , invalidRuleInputLocations = badDeps
+            , invalidRuleOutputLocations = badResults }
+
+normaliseDynDepEdge
+  :: LocalBuildInfo
+  -> TargetInfo
+  -> (Rule, [Rule.Dependency], Any)
+  -> IO ( Either InvalidRuleLocations ([Rule.Dependency], Any) )
+normaliseDynDepEdge lbi tgt (r, deps, dynDepsData) = do
+  (badDeps, deps') <-
+    partitionEithers <$>
+      traverse (normaliseDependency lbi tgt) deps
+  if null badDeps
+  then return $ Right $ (deps', dynDepsData)
+  else return $ Left $
+          InvalidRuleLocations
+            { invalidRuleLocationsRule = r
+            , invalidRuleLocationsIsDynamic = True
+            , invalidRuleInputLocations = badDeps
+            , invalidRuleOutputLocations = [] }
+
+badInputLocationMaybe
+  :: LocalBuildInfo
+  -> TargetInfo
+  -> Location
+  -> Maybe InvalidRuleInputLocationReason
+badInputLocationMaybe _lbi _tgt (base, _)
+  | isAbsolute base
+  = Just $ InputLocationNotRelative
+  | pathGoesBackwards base
+  = Just $ InputLocationOutsidePackage
+  | otherwise
+  = Nothing
+
+badOutputLocationMaybe
+  :: LocalBuildInfo
+  -> TargetInfo
+  -> Location
+  -> Maybe InvalidRuleOutputLocationReason
+badOutputLocationMaybe _lbi _tgt (base, _)
+  | isAbsolute base
+  = Just $ OutputLocationNotRelative
+  | pathGoesBackwards base
+  = Just $ OutputLocationOutsidePackage
+  -- TODO: is this desirable?
+  -- | base /= getSymbolicPath (autogenComponentModulesDir lbi (targetCLBI tgt))
+  -- = Just $ OutputLocationNotAutogen
+  | otherwise
+  = Nothing
+
+-- | Does the given relative path go backwards outside of the base directory
+-- it starts in?
+pathGoesBackwards :: FilePath -> Bool
+-- SetupHooks TODO: this does not account for symlinks, but
+-- using 'canonicalizePath' seems overkill.
+pathGoesBackwards fp = go 0 (splitDirectories fp)
+  where
+    go :: Int -> [FilePath] -> Bool
+    go i [] = i < 0
+    go i (".." : rest) = go (i-1) rest
+    go i ("." : rest)  = go i rest
+    go i (_ : rest)    = go (i+1) rest
+
+normaliseInputLocation
+  :: LocalBuildInfo
+  -> TargetInfo
+  -> Location
+  -> IO (Either (Location, InvalidRuleInputLocationReason) Location)
+normaliseInputLocation lbi tgt (base, fp) = do
+  let base' = normalise base
+  let loc = (base', fp)
+  case badInputLocationMaybe lbi tgt loc of
+    Nothing -> return $ Right loc
+    Just err -> return $ Left (loc, err)
+
+normaliseOutputLocation
+  :: LocalBuildInfo
+  -> TargetInfo
+  -> Location
+  -> IO (Either (Location, InvalidRuleOutputLocationReason) Location)
+normaliseOutputLocation lbi tgt (base, fp) = do
+  let base' = normalise base
+  let loc = (base', fp)
+  case badOutputLocationMaybe lbi tgt loc of
+    Nothing -> return $ Right loc
+    Just err -> return $ Left (loc, err)
+
+normaliseDependency
+  :: LocalBuildInfo
+  -> TargetInfo
+  -> Rule.Dependency
+  -> IO (Either (Location, InvalidRuleInputLocationReason) Rule.Dependency)
+normaliseDependency _   _ dep@(RuleDependency {}) =
+  return $ Right $ dep
+normaliseDependency lbi tgt (FileDependency loc) = do
+  mbLoc' <- normaliseInputLocation lbi tgt loc
+  case mbLoc' of
+    Left err -> return $ Left err
+    Right loc' -> return $ Right $ FileDependency loc'
 
 --------------------------------------------------------------------------------
 -- Compatibility with HookedBuildInfo.
