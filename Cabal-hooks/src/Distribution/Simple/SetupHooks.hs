@@ -208,12 +208,6 @@ import Distribution.Verbosity
 
 import Control.Monad.IO.Class
   ( liftIO )
-import qualified Control.Monad.Trans.State as State
-#if MIN_VERSION_transformers(0,5,6)
-import qualified Control.Monad.Trans.Writer.CPS as Writer
-#else
-import qualified Control.Monad.Trans.Writer.Strict as Writer
-#endif
 import Data.Foldable
   ( for_ )
 import Data.Functor.Identity
@@ -543,43 +537,3 @@ updateComponentsGeneratedMods alwaysRerun compActId getModsContents =
         (Map.insert compActId modsContents mods, ())
       return modsContents
 
---------------------------------------------------------------------------------
--- API functions
-
--- | SetupHooks internal function used to implement 'registerAction'.
-register :: ( Monad m, Ord x_id )
-         => x_id -> ( x_id -> x_id )
-         -> x -> FreshT x x_id m x_id
-register zeroId succId rule = FreshT $ do
-  oldRules <- State.get
-  let newId
-        | Just ( x_id, _ ) <- Map.lookupMax oldRules
-        = succId x_id
-        | otherwise
-        = zeroId
-      !newRules = Map.insert newId rule oldRules
-  State.put newRules
-  return newId
-
--- | Register a rule.
-registerRule :: Monad m => Rule -> RulesT m ()
-registerRule r = Writer.tell ( [r], [] )
-
--- | Declare additional monitored objects for the collection of all rules.
---
--- When these monitored objects change, the rules are re-computed.
-addRuleMonitors :: Monad m => [ MonitorFileOrDir ] -> RulesT m ()
-addRuleMonitors mons = Writer.tell ( [], mons )
-
--- | Register an action. Returns a unique identifier for that action.
-registerAction :: Action -> FreshT Action ActionId Identity ActionId
-registerAction = register ( ActionId 1 ) ( \ ( ActionId i ) -> ActionId ( i + 1 ) )
-
--- | Find a file in the given search directories.
-findFileInDirs :: FilePath -> [FilePath] -> IO (Maybe Location)
-findFileInDirs file dirs =
-  findFirstFile
-    (uncurry (</>))
-      [ (path, file)
-      | path <- nub dirs
-      ]

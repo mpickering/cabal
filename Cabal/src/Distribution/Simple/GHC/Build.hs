@@ -8,6 +8,7 @@ module Distribution.Simple.GHC.Build
   , isDynamic
   , flibBuildName
   , flibTargetName
+  , flibIsDynamic
   , exeTargetName
   )
 where
@@ -126,6 +127,16 @@ flibBuildName lbi flib
 
     nm :: String
     nm = unUnqualComponentName $ foreignLibName flib
+
+flibIsDynamic :: ForeignLib -> Bool
+flibIsDynamic flib =
+  case foreignLibType flib of
+    ForeignLibNativeShared ->
+      ForeignLibStandalone `notElem` foreignLibOptions flib
+    ForeignLibNativeStatic ->
+      False
+    ForeignLibTypeUnknown ->
+      cabalBug "unknown foreign lib type"
 
 supportsDynamicToo :: Compiler -> Bool
 supportsDynamicToo = Internal.ghcLookupProperty "Support dynamic-too"

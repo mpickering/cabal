@@ -141,6 +141,7 @@ library
     Distribution.Simple.Test.Log
     Distribution.Simple.UHC
     Distribution.Simple.UserHooks
+    Distribution.Simple.SetupHooks.Builtin
     Distribution.Simple.SetupHooks.Errors
     Distribution.Simple.SetupHooks.Internal
     Distribution.Simple.SetupHooks.Rule

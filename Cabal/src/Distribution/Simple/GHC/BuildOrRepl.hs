@@ -247,7 +247,6 @@ buildOrReplLib mReplFlags verbosity numJobs pkg_descr lbi lib clbi = do
       let baseSrcOpts =
             mkSrcOpts
               verbosity
-              implInfo
               lbi
               libBi
               clbi

@@ -56,7 +56,7 @@ module Distribution.Simple.GHC
   , hcPkgInfo
   , registerPackage
   , componentGhcOptions
-  , componentCcGhcOptions
+  , Internal.componentCcGhcOptions
   , getGhcAppDir
   , getLibDir
   , isDynamic
@@ -703,20 +703,6 @@ libAbiHash verbosity _pkg_descr lbi lib clbi = do
       verbosity
       (ghcInvocation ghcProg comp platform ghcArgs)
   return (takeWhile (not . isSpace) hash)
-
-componentCcGhcOptions
-  :: Verbosity
-  -> LocalBuildInfo
-  -> BuildInfo
-  -> ComponentLocalBuildInfo
-  -> FilePath
-  -> FilePath
-  -> GhcOptions
-componentCcGhcOptions verbosity lbi =
-  Internal.componentCcGhcOptions verbosity implInfo lbi
-  where
-    comp = compiler lbi
-    implInfo = getImplInfo comp
 
 -- -----------------------------------------------------------------------------
 -- Installing

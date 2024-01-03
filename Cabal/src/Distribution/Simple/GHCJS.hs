@@ -23,7 +23,7 @@ module Distribution.Simple.GHCJS
   , hcPkgInfo
   , registerPackage
   , componentGhcOptions
-  , componentCcGhcOptions
+  , Internal.componentCcGhcOptions
   , getLibDir
   , isDynamic
   , getGlobalPackageDB
@@ -1215,7 +1215,6 @@ gbuild verbosity numJobs pkg_descr lbi bm clbi = do
         GBuildFLib{} -> mempty
       comp = compiler lbi
       platform = hostPlatform lbi
-      implInfo = getImplInfo comp
       runGhcProg = runGHC verbosity ghcjsProg comp platform
 
   let (bnfo, threaded) = case bm of
@@ -1419,7 +1418,6 @@ gbuild verbosity numJobs pkg_descr lbi bm clbi = do
         let baseCxxOpts =
               Internal.componentCxxGhcOptions
                 verbosity
-                implInfo
                 lbi
                 bnfo
                 clbi
@@ -1466,7 +1464,6 @@ gbuild verbosity numJobs pkg_descr lbi bm clbi = do
         let baseCcOpts =
               Internal.componentCcGhcOptions
                 verbosity
-                implInfo
                 lbi
                 bnfo
                 clbi
@@ -1787,20 +1784,6 @@ componentGhcOptions verbosity lbi bi clbi odir =
    in opts
         { ghcOptExtra = ghcOptExtra opts `mappend` hcOptions GHCJS bi
         }
-
-componentCcGhcOptions
-  :: Verbosity
-  -> LocalBuildInfo
-  -> BuildInfo
-  -> ComponentLocalBuildInfo
-  -> FilePath
-  -> FilePath
-  -> GhcOptions
-componentCcGhcOptions verbosity lbi =
-  Internal.componentCcGhcOptions verbosity implInfo lbi
-  where
-    comp = compiler lbi
-    implInfo = getImplInfo comp
 
 -- -----------------------------------------------------------------------------
 -- Installing
