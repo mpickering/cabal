@@ -24,6 +24,8 @@ import qualified Data.List.NonEmpty as NE
 import Distribution.Simple.Program (requireProgram)
 import Distribution.Verbosity (Verbosity)
 
+-- ROMES:TODO: We also need to add the sources to the autogen modules s.t. they
+-- are demanded... but can I add a .o file to the autogen modules list?
 builtinBuildHooks :: BuildHooks
 builtinBuildHooks = noBuildHooks
   { preBuildComponentRules = Just $ mconcat
@@ -33,6 +35,9 @@ builtinBuildHooks = noBuildHooks
       , buildAsmSources
       , buildCmmSources
       ] }
+
+-- ROMES:TODO: unless (not hasJsSupport || null jsSrcs) $ ... and (not has_code)
+-- where has_code = not (componentIsIndefinite clbi)
 
 -- ROMES:PATCH:NOTE: Worry about mimicking the current behaviour first, and only
 -- later worry about dependency tracking and ghc -M, gcc -M, or ghc -optc-MD ...
