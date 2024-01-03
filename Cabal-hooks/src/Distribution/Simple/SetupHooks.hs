@@ -448,7 +448,7 @@ generateModules getModNames getModsContents =
   noSetupHooks
     { configureHooks = noConfigureHooks
       { preConfComponentHook = Just declareModulesPreConfHook }
-    , buildHooks = noBuildHooks
+      , buildHooks = noBuildHooks
       { preBuildComponentRules = Just genModulesRules }
     }
   where

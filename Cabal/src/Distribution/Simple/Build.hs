@@ -102,7 +102,6 @@ import Distribution.Simple.Setup.Repl
 import Distribution.Simple.SetupHooks.Internal
   ( BuildHooks (..)
   , BuildingWhat (..)
-  , noBuildHooks
   )
 import qualified Distribution.Simple.SetupHooks.Internal as SetupHooks
 import Distribution.Simple.ShowBuildInfo
@@ -124,6 +123,7 @@ import qualified Data.Map as Map
 import Distribution.Simple.Errors
 import System.Directory (doesFileExist, getCurrentDirectory, removeFile)
 import System.FilePath (takeDirectory, (<.>), (</>))
+import Distribution.Simple.SetupHooks.Builtin (builtinBuildHooks)
 
 -- -----------------------------------------------------------------------------
 
@@ -138,7 +138,7 @@ build
   -> [PPSuffixHandler]
   -- ^ preprocessors to run before compiling
   -> IO ()
-build = build_setupHooks noBuildHooks
+build = build_setupHooks builtinBuildHooks
 
 build_setupHooks
   :: BuildHooks
@@ -320,7 +320,7 @@ repl
   -- ^ preprocessors to run before compiling
   -> [String]
   -> IO ()
-repl = repl_setupHooks noBuildHooks
+repl = repl_setupHooks builtinBuildHooks
 
 repl_setupHooks
   :: BuildHooks

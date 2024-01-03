@@ -92,6 +92,7 @@ import Distribution.Simple.Errors
 import System.Directory (doesDirectoryExist, doesFileExist, getCurrentDirectory)
 import System.FilePath (isAbsolute, normalise, (<.>), (</>))
 import System.IO (hClose, hPutStrLn, hSetEncoding, utf8)
+import Distribution.Simple.SetupHooks.Builtin (builtinBuildHooks)
 
 -- ------------------------------------------------------------------------------
 -- Types
@@ -219,7 +220,7 @@ haddock
   -> [PPSuffixHandler]
   -> HaddockFlags
   -> IO ()
-haddock = haddock_setupHooks noBuildHooks
+haddock = haddock_setupHooks builtinBuildHooks
 
 haddock_setupHooks
   :: BuildHooks
@@ -1167,7 +1168,7 @@ hscolour
   -> [PPSuffixHandler]
   -> HscolourFlags
   -> IO ()
-hscolour = hscolour_setupHooks noBuildHooks
+hscolour = hscolour_setupHooks builtinBuildHooks
 
 hscolour_setupHooks
   :: BuildHooks
