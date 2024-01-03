@@ -23,6 +23,7 @@ import Distribution.Simple.LocalBuildInfo
 import qualified Data.List.NonEmpty as NE
 import Distribution.Simple.Program (requireProgram)
 import Distribution.Verbosity (Verbosity)
+import Distribution.Types.ComponentName (componentNameRaw)
 
 -- ROMES:TODO: We also need to add the sources to the autogen modules s.t. they
 -- are demanded... but can I add a .o file to the autogen modules list?
@@ -163,8 +164,20 @@ buildExtraSources componentSourceGhcOptions wantDyn viewSources = rules $ \PreBu
         -- ROMES:TODO: Message custom for each build source type
         info verbosity "Determining build rules for extra sources..."
         print sources
-      forM_ sources $ \source ->
+      forM_ sources $ \source -> do
+        -- Until we get rid of the "exename-tmp" directory within the executable
+        -- build dir, we need to accommodate that fact (see eg @tmpDir@ in @gbuild@)
+        -- This is a workaround for #9498 until it is fixed.
+        let cname = componentName (targetComponent targetInfo)
+        let buildDir'
+              | CLibName{} <- cname
+              = componentBuildDir lbi clbi
+              | CNotLibName{} <- cname
+              = componentBuildDir lbi clbi </>
+                  componentNameRaw cname <> "-tmp"
+
+        registerRule $ simpleRule buildAction [("", source)] (NE.singleton (buildDir', source -<.> "o"))
         -- ROMES:TODO: Is source the path to the source from the .cabal root
-        -- or something else? Document in SetupHooks haddocks
-        registerRule $ simpleRule buildAction [("", source)] (NE.singleton (componentBuildDir lbi clbi, source -<.> "o"))
+        -- or something else? Document in SetupHooks haddocks (e.g. here we're
+        -- using "")
 
