@@ -1000,10 +1000,14 @@ executeRules verbosity lbi tgtInfo rulesFromInputs inputs = do
   where
     clbi = targetCLBI tgtInfo
     compAutogenDir = autogenComponentModulesDir lbi clbi
-    compBuildDir =
-      componentBuildDir lbi clbi </>
-        -- Workaround #9498 until it is fixed.
-        componentNameRaw (componentName (targetComponent tgtInfo)) <> "-tmp"
+    compName = componentName (targetComponent tgtInfo)
+    compBuildDir
+      | CLibName{} <- compName
+      = componentBuildDir lbi clbi
+      -- Workaround #9498 until it is fixed.
+      | CNotLibName{} <- compName
+      = componentBuildDir lbi clbi </>
+          componentNameRaw compName <> "-tmp"
 
 -- | Does the rule output the given location?
 ruleOutputsLocation :: Rule -> Location -> Bool
