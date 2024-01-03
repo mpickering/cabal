@@ -122,7 +122,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 
 import System.Directory (doesFileExist)
-import System.FilePath ((<.>), (</>))
+import System.FilePath ((<.>), (</>), (-<.>), makeRelative)
 import qualified Control.Monad.Trans.State as State
 #if MIN_VERSION_transformers(0,5,6)
 import qualified Control.Monad.Trans.Writer.CPS as Writer
@@ -919,8 +919,19 @@ executeRules verbosity lbi tgtInfo rulesFromInputs inputs = do
         autogenModules $
           componentBuildInfo $
             targetComponent tgtInfo
+    -- Hardcode demand for rules that produce objects from extra build sources.
+    extraObjs =
+      map (\fp -> fp -<.> "o") $
+        concatMap ((makeRelative compAutogenDir <$>) . ($ componentBuildInfo (targetComponent tgtInfo))) $
+          [ cSources
+          , cxxSources
+          , jsSources
+          , asmSources
+          , cmmSources
+          ]
     leafRule_maybe (rId, r) =
       if any ((r `ruleOutputsLocation`) . (compAutogenDir,)) autogenModPaths
+         || any ((r `ruleOutputsLocation`) . (compBuildDir,)) extraObjs
         then vertexFromRuleId rId
         else Nothing
     leafRules = mapMaybe leafRule_maybe allRules
@@ -989,6 +1000,7 @@ executeRules verbosity lbi tgtInfo rulesFromInputs inputs = do
   where
     clbi = targetCLBI tgtInfo
     compAutogenDir = autogenComponentModulesDir lbi clbi
+    compBuildDir = componentBuildDir lbi clbi
 
 -- | Does the rule output the given location?
 ruleOutputsLocation :: Rule -> Location -> Bool
