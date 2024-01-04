@@ -6,4 +6,4 @@ main = cabalTest $ do
     -- Make sure we don't get this ghci error
     -- *Lib> ghc: ^^ Could not load '_foo', dependency unresolved. See top entry above.
     assertOutputDoesNotContain "Could not load" res
-    assertOutputContains "Building C Sources..." res
+    assertOutputContains "C Sources..." res

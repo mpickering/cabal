@@ -121,7 +121,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
-import Distribution.Simple.GHC.Build (isHaskell) -- a bit unfortunate that we have to import this from there...
+import Distribution.Simple.GHC.Build (isC, isCxx) -- a bit unfortunate that we have to import this from there...
 import System.Directory (doesFileExist)
 import System.FilePath ((<.>), (</>), (-<.>), normalise)
 import qualified Control.Monad.Trans.State as State
@@ -934,7 +934,9 @@ executeRules verbosity lbi tgtInfo rulesFromInputs inputs = do
       case targetComponent tgtInfo of
         CExe exe
           -- We demand non-haskell main executable entry points.
-          | not . isHaskell $ modulePath exe
+          -- We cannot use the `isHaskell` predicate because that doesn't
+          -- account for .hsc files, so we only demand C or C++ main files.
+          | isC (modulePath exe) || isCxx (modulePath exe)
           -> Just (modulePath exe -<.> "o")
         _ -> Nothing
     leafRule_maybe (rId, r) =

@@ -11,7 +11,7 @@ module Distribution.Simple.GHC.Build
   , flibTargetName
   , flibIsDynamic
   , exeTargetName
-  , isCxx
+  , isCxx, isC
   , isHaskell
   )
 where
@@ -161,6 +161,10 @@ isDynamic = Internal.ghcLookupProperty "GHC Dynamic"
 -- | Is this file a C++ source file, i.e. ends with .cpp, .cxx, or .c++?
 isCxx :: FilePath -> Bool
 isCxx fp = elem (takeExtension fp) [".cpp", ".cxx", ".c++"]
+
+-- | Is this a C source file, i.e. ends with .c?
+isC :: FilePath -> Bool
+isC fp = elem (takeExtension fp) [".c"]
 
 -- | FilePath has a Haskell extension: .hs or .lhs
 isHaskell :: FilePath -> Bool
