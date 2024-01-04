@@ -20,6 +20,7 @@ import Distribution.Simple.SetupHooks.Rule as Rule
 import Distribution.Simple.GHC.Build
 import System.FilePath
 import Distribution.Simple.LocalBuildInfo
+import Distribution.Types.Executable
 import qualified Data.List.NonEmpty as NE
 import Distribution.Simple.Program (requireProgram)
 import Distribution.Verbosity (Verbosity)
@@ -54,15 +55,23 @@ buildCSources, buildCxxSources, buildJsSources
 -- from writing their own build rules for declared foreign modules in main-is
 -- and eventually custom stanzas.
 buildCSources = buildExtraSources "C Sources"
-  Internal.componentCcGhcOptions True isC cSources
+  Internal.componentCcGhcOptions True
+    (\c -> cSources (componentBuildInfo c) ++
+            case c of CExe exe | isC (modulePath exe) -> [modulePath exe]
+                      _otherwise -> []
+    )
 buildCxxSources = buildExtraSources "C++ Sources"
-  Internal.componentCxxGhcOptions True isCxx cxxSources
+  Internal.componentCxxGhcOptions True
+    (\c -> cxxSources (componentBuildInfo c) ++
+            case c of CExe exe | isCxx (modulePath exe) -> [modulePath exe]
+                      _otherwise -> []
+    )
 buildJsSources = buildExtraSources "JS Sources"
-  Internal.componentJsGhcOptions False (const False) jsSources
+  Internal.componentJsGhcOptions False (jsSources . componentBuildInfo)
 buildAsmSources = buildExtraSources "Assembler Sources"
-  Internal.componentAsmGhcOptions True (const False) asmSources
+  Internal.componentAsmGhcOptions True (asmSources . componentBuildInfo)
 buildCmmSources = buildExtraSources "C-- Sources"
-  Internal.componentCmmGhcOptions True (const False) cmmSources
+  Internal.componentCmmGhcOptions True (cmmSources . componentBuildInfo)
 
 -- | Create 'PreBuildComponentRules' for a given type of extra build sources
 -- which are compiled via a GHC invocation with the given options. Used to
@@ -76,21 +85,20 @@ buildExtraSources :: String
                   -- @'Internal.componentCmmGhcOptions'@)
                   -> Bool
                   -- ^ Want dynamic?
-                  -> (FilePath -> Bool)
-                  -- ^ Whether to build the given executable entry point (main
-                  -- source file) together with the extra sources with the same
-                  -- rule action. For non-@'Executable'@ components this
-                  -- function is not even called, and is typically @const
-                  -- False@. However, if the main file is a C source, we will
-                  -- want to create a rule for it as we do for other C sources.
-                  -> (BuildInfo -> [FilePath])
-                  -- ^ View the extra sources from the build info (e.g. @'asmSources'@, @'cSources'@)
+                  -> (Component -> [FilePath])
+                  -- ^ View the extra sources of a component, typically from
+                  -- the build info (e.g. @'asmSources'@, @'cSources'@).
+                  -- @'Executable'@ components might additionally add the
+                  -- program entry point (@main-is@ file) to the extra sources,
+                  -- if it should be compiled as the rest of them.
                   -> PreBuildComponentRules
-buildExtraSources description componentSourceGhcOptions wantDyn mainSourceToo viewSources =
+buildExtraSources description componentSourceGhcOptions wantDyn viewSources =
   rules $ \PreBuildComponentInputs{buildingWhat, localBuildInfo=lbi, targetInfo} -> do
     let bi = componentBuildInfo (targetComponent targetInfo)
         verbosity = buildingWhatVerbosity buildingWhat
         clbi = targetCLBI targetInfo
+
+        sources = viewSources (targetComponent targetInfo)
 
         comp = compiler lbi
         platform = hostPlatform lbi
@@ -179,7 +187,6 @@ buildExtraSources description componentSourceGhcOptions wantDyn mainSourceToo vi
       _inouts -> error "buildExtraSources: unexpected build rule inputs and outputs"
 
     return $ do
-
       -- Until we get rid of the "exename-tmp" directory within the executable
       -- build dir, we need to accommodate that fact (see eg @tmpDir@ in @gbuild@)
       -- This is a workaround for #9498 until it is fixed.
@@ -191,22 +198,11 @@ buildExtraSources description componentSourceGhcOptions wantDyn mainSourceToo vi
             = componentBuildDir lbi clbi </>
                 componentNameRaw cname <> "-tmp"
 
-      extraMainSource
-        <- case targetComponent targetInfo of
-             CExe exe -> liftIO $ do
-               main <- findExecutableMain verbosity buildDir' exe
-               if mainSourceToo main
-                  then return [main]
-                  else return []
-             _other   -> pure []
-
-      let sources = viewSources bi ++ extraMainSource
-
       -- build any sources
       unless (null sources) $ do
         liftIO $ do
           -- ROMES:TODO: Message custom for each build source type
-          info verbosity ("Determining build rules for " ++ description ++ "...")
+          info verbosity ("Configuring build rules for " ++ description ++ "...")
           print sources
 
         forM_ sources $ \source -> do
