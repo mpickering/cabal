@@ -187,7 +187,7 @@ import Distribution.Simple.Setup
 import Distribution.Simple.SetupHooks.Internal
 import Distribution.Simple.SetupHooks.Rule as Rule
 import Distribution.Simple.Utils
-  ( findFirstFile, rewriteFileLBS )
+  ( rewriteFileLBS )
 import Distribution.System
   ( Platform(..) )
 import qualified Distribution.Types.BuildInfo.Lens as Lens
@@ -210,16 +210,12 @@ import Control.Monad.IO.Class
   ( liftIO )
 import Data.Foldable
   ( for_ )
-import Data.Functor.Identity
-  ( Identity(..) )
 import Data.IORef
   ( IORef, newIORef, readIORef, atomicModifyIORef' )
-import Data.List
-  ( nub )
 import qualified Data.List.NonEmpty as NE
   ( nonEmpty )
 import Data.Map.Strict as Map
-  ( Map, assocs, empty, insert, keys, lookup, lookupMax, mapMaybe )
+  ( Map, assocs, empty, insert, keys, lookup, mapMaybe )
 import System.FilePath
   ( (</>) )
 import System.IO.Unsafe

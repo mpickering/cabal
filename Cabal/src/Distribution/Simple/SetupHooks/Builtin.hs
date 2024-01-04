@@ -51,7 +51,7 @@ buildCSources, buildCxxSources, buildJsSources
   , buildAsmSources, buildCmmSources :: PreBuildComponentRules
 -- An executable main file may be a Cxx or C file. We consider the main file a
 -- Cxx source if it is a .cpp/.cxx/.c++ file, and consider it a C source otherwise.
-buildCSources   = buildExtraSources Internal.componentCcGhcOptions  True  (not . isCxx) cSources
+buildCSources   = buildExtraSources Internal.componentCcGhcOptions  True  (\f -> not (isHaskell f || isCxx f)) cSources
 buildCxxSources = buildExtraSources Internal.componentCxxGhcOptions True  isCxx         cxxSources
 buildJsSources  = buildExtraSources Internal.componentJsGhcOptions  False (const False) jsSources
 buildAsmSources = buildExtraSources Internal.componentAsmGhcOptions True  (const False) asmSources
