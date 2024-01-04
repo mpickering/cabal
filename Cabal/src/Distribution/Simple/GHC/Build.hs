@@ -6,10 +6,13 @@ module Distribution.Simple.GHC.Build
   , componentGhcOptions
   , supportsDynamicToo
   , isDynamic
+  , findExecutableMain
   , flibBuildName
   , flibTargetName
   , flibIsDynamic
   , exeTargetName
+  , isCxx
+  , isHaskell
   )
 where
 
@@ -49,12 +52,23 @@ import System.FilePath
   , (<.>)
   , (</>)
   )
+import Distribution.Utils.Path (getSymbolicPath)
 
 exeTargetName :: Platform -> Executable -> String
 exeTargetName platform exe = unUnqualComponentName (exeName exe) `withExt` exeExtension platform
 
 withExt :: FilePath -> String -> FilePath
 withExt fp ext = fp <.> if takeExtension fp /= ('.' : ext) then ext else ""
+
+-- | Find the path to the entry point of an executable (typically specified in
+-- @main-is@, and found in @hs-source-dirs@).
+findExecutableMain :: Verbosity
+                   -> FilePath -- ^ Build directory
+                   -> Executable
+                   -> IO FilePath -- ^ The path to the main source file.
+findExecutableMain verbosity bdir Executable{buildInfo = bnfo, modulePath = modPath}
+  = findFileEx verbosity (bdir : map getSymbolicPath (hsSourceDirs bnfo)) modPath
+
 
 -- | Target name for a foreign library (the actual file name)
 --
@@ -143,6 +157,14 @@ supportsDynamicToo = Internal.ghcLookupProperty "Support dynamic-too"
 
 isDynamic :: Compiler -> Bool
 isDynamic = Internal.ghcLookupProperty "GHC Dynamic"
+
+-- | Is this file a C++ source file, i.e. ends with .cpp, .cxx, or .c++?
+isCxx :: FilePath -> Bool
+isCxx fp = elem (takeExtension fp) [".cpp", ".cxx", ".c++"]
+
+-- | FilePath has a Haskell extension: .hs or .lhs
+isHaskell :: FilePath -> Bool
+isHaskell fp = elem (takeExtension fp) [".hs", ".lhs"]
 
 componentGhcOptions
   :: Verbosity

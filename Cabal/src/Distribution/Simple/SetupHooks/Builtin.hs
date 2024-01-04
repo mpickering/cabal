@@ -37,19 +37,25 @@ builtinBuildHooks = noBuildHooks
       , buildCmmSources
       ] }
 
--- ROMES:TODO: unless (not hasJsSupport || null jsSrcs) $ ... and (not has_code)
+-- ROMES:TODO:
+-- unless (not hasJsSupport || null jsSrcs) $ ... and (not has_code)
 -- where has_code = not (componentIsIndefinite clbi)
 
 -- ROMES:PATCH:NOTE: Worry about mimicking the current behaviour first, and only
 -- later worry about dependency tracking and ghc -M, gcc -M, or ghc -optc-MD ...
 
+-- ROMES:TODO:
+-- How should we handle a C source depending on a stub generated from a foreign export?
+
 buildCSources, buildCxxSources, buildJsSources
   , buildAsmSources, buildCmmSources :: PreBuildComponentRules
-buildCSources   = buildExtraSources Internal.componentCcGhcOptions True cSources
-buildCxxSources = buildExtraSources Internal.componentCxxGhcOptions True cxxSources
-buildJsSources  = buildExtraSources Internal.componentJsGhcOptions False jsSources
-buildAsmSources = buildExtraSources Internal.componentAsmGhcOptions True asmSources
-buildCmmSources = buildExtraSources Internal.componentCmmGhcOptions True cmmSources
+-- An executable main file may be a Cxx or C file. We consider the main file a
+-- Cxx source if it is a .cpp/.cxx/.c++ file, and consider it a C source otherwise.
+buildCSources   = buildExtraSources Internal.componentCcGhcOptions  True  (not . isCxx) cSources
+buildCxxSources = buildExtraSources Internal.componentCxxGhcOptions True  isCxx         cxxSources
+buildJsSources  = buildExtraSources Internal.componentJsGhcOptions  False (const False) jsSources
+buildAsmSources = buildExtraSources Internal.componentAsmGhcOptions True  (const False) asmSources
+buildCmmSources = buildExtraSources Internal.componentCmmGhcOptions True  (const False) cmmSources
 
 -- | Create 'PreBuildComponentRules' for a given type of extra build sources
 -- which are compiled via a GHC invocation with the given options. Used to
@@ -61,12 +67,18 @@ buildExtraSources :: (Verbosity -> LocalBuildInfo -> BuildInfo -> ComponentLocal
                   -- @'Internal.componentCmmGhcOptions'@)
                   -> Bool
                   -- ^ Want dynamic?
+                  -> (FilePath -> Bool)
+                  -- ^ Whether to build the given executable entry point (main
+                  -- source file) together with the extra sources with the same
+                  -- rule action. For non-@'Executable'@ components this
+                  -- function is not even called, and is typically @const
+                  -- False@. However, if the main file is a C source, we will
+                  -- want to create a rule for it as we do for other C sources.
                   -> (BuildInfo -> [FilePath])
                   -- ^ View the extra sources from the build info (e.g. @'asmSources'@, @'cSources'@)
                   -> PreBuildComponentRules
-buildExtraSources componentSourceGhcOptions wantDyn viewSources = rules $ \PreBuildComponentInputs{buildingWhat, localBuildInfo=lbi, targetInfo} -> do
+buildExtraSources componentSourceGhcOptions wantDyn mainSourceToo viewSources = rules $ \PreBuildComponentInputs{buildingWhat, localBuildInfo=lbi, targetInfo} -> do
   let bi = componentBuildInfo (targetComponent targetInfo)
-      sources = viewSources bi
       verbosity = buildingWhatVerbosity buildingWhat
       clbi = targetCLBI targetInfo
 
@@ -158,23 +170,36 @@ buildExtraSources componentSourceGhcOptions wantDyn viewSources = rules $ \PreBu
 
   return $ do
 
-    -- build any C sources
+    -- Until we get rid of the "exename-tmp" directory within the executable
+    -- build dir, we need to accommodate that fact (see eg @tmpDir@ in @gbuild@)
+    -- This is a workaround for #9498 until it is fixed.
+    let cname = componentName (targetComponent targetInfo)
+    let buildDir'
+          | CLibName{} <- cname
+          = componentBuildDir lbi clbi
+          | CNotLibName{} <- cname
+          = componentBuildDir lbi clbi </>
+              componentNameRaw cname <> "-tmp"
+
+    extraMainSource
+      <- case targetComponent targetInfo of
+           CExe exe -> liftIO $ do
+             main <- findExecutableMain verbosity buildDir' exe
+             if mainSourceToo main
+                then return [main]
+                else return []
+           _other   -> pure []
+
+    let sources = viewSources bi ++ extraMainSource
+
+    -- build any sources
     unless (null sources) $ do
       liftIO $ do
         -- ROMES:TODO: Message custom for each build source type
         info verbosity "Determining build rules for extra sources..."
         print sources
+
       forM_ sources $ \source -> do
-        -- Until we get rid of the "exename-tmp" directory within the executable
-        -- build dir, we need to accommodate that fact (see eg @tmpDir@ in @gbuild@)
-        -- This is a workaround for #9498 until it is fixed.
-        let cname = componentName (targetComponent targetInfo)
-        let buildDir'
-              | CLibName{} <- cname
-              = componentBuildDir lbi clbi
-              | CNotLibName{} <- cname
-              = componentBuildDir lbi clbi </>
-                  componentNameRaw cname <> "-tmp"
 
         registerRule $ simpleRule buildAction [("", source)] (NE.singleton (buildDir', source -<.> "o"))
         -- ROMES:TODO: Is source the path to the source from the .cabal root

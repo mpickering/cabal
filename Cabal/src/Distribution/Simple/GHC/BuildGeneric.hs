@@ -20,17 +20,6 @@ import Distribution.Pretty
 import Distribution.Simple.BuildPaths
 import Distribution.Simple.Compiler
 import Distribution.Simple.GHC.Build
-  ( componentGhcOptions
-  , exeTargetName
-  , flibBuildName
-  , flibTargetName
-  , flibIsDynamic
-  , getRPaths
-  , isDynamic
-  , replNoLoad
-  , runReplOrWriteFlags
-  , supportsDynamicToo
-  )
 import qualified Distribution.Simple.GHC.Internal as Internal
 import qualified Distribution.Simple.Hpc as Hpc
 import Distribution.Simple.LocalBuildInfo
@@ -44,7 +33,6 @@ import Distribution.System
 import Distribution.Types.PackageName.Magic
 import Distribution.Types.ParStrat
 import Distribution.Utils.NubList
-import Distribution.Utils.Path
 import Distribution.Verbosity
 import Distribution.Version
 import System.Directory
@@ -55,7 +43,6 @@ import System.Directory
   )
 import System.FilePath
   ( replaceExtension
-  , takeExtension
   , (</>)
   )
 
@@ -165,8 +152,8 @@ gbuildSources verbosity pkgId specVer tmpDir bm =
     GReplFLib _ flib -> return $ flibSources flib
   where
     exeSources :: Executable -> IO BuildSources
-    exeSources exe@Executable{buildInfo = bnfo, modulePath = modPath} = do
-      main <- findFileEx verbosity (tmpDir : map getSymbolicPath (hsSourceDirs bnfo)) modPath
+    exeSources exe@Executable{buildInfo = bnfo} = do
+      main <- findExecutableMain verbosity tmpDir exe
       let mainModName = fromMaybe ModuleName.main $ exeMainModuleName exe
           otherModNames = exeModules exe
 
@@ -244,9 +231,6 @@ gbuildSources verbosity pkgId specVer tmpDir bm =
         , inputSourceModules = foreignLibModules flib
         }
 
-    isCxx :: FilePath -> Bool
-    isCxx fp = elem (takeExtension fp) [".cpp", ".cxx", ".c++"]
-
 -- | Extract (and compute) information about the RTS library
 --
 -- TODO: This hardcodes the name as @HSrts-ghc<version>@. I don't know if we can
@@ -295,10 +279,6 @@ hasThreaded :: BuildInfo -> Bool
 hasThreaded bi = elem "-threaded" ghc
   where
     PerCompilerFlavor ghc _ = options bi
-
--- | FilePath has a Haskell extension: .hs or .lhs
-isHaskell :: FilePath -> Bool
-isHaskell fp = elem (takeExtension fp) [".hs", ".lhs"]
 
 -- | "Main" module name when overridden by @ghc-options: -main-is ...@
 -- or 'Nothing' if no @-main-is@ flag could be found.

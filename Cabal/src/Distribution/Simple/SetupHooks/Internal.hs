@@ -121,8 +121,9 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
+import Distribution.Simple.GHC.Build (isHaskell) -- a bit unfortunate that we have to import this from there...
 import System.Directory (doesFileExist)
-import System.FilePath ((<.>), (</>), (-<.>), makeRelative)
+import System.FilePath ((<.>), (</>), (-<.>), normalise)
 import qualified Control.Monad.Trans.State as State
 #if MIN_VERSION_transformers(0,5,6)
 import qualified Control.Monad.Trans.Writer.CPS as Writer
@@ -922,16 +923,23 @@ executeRules verbosity lbi tgtInfo rulesFromInputs inputs = do
     -- Hardcode demand for rules that produce objects from extra build sources.
     extraObjs =
       map (\fp -> fp -<.> "o") $
-        concatMap ((makeRelative compAutogenDir <$>) . ($ componentBuildInfo (targetComponent tgtInfo))) $
+        concatMap ($ componentBuildInfo (targetComponent tgtInfo)) $
           [ cSources
           , cxxSources
           , jsSources
           , asmSources
           , cmmSources
           ]
+    mainObj =
+      case targetComponent tgtInfo of
+        CExe exe
+          -- We demand non-haskell main executable entry points.
+          | not . isHaskell $ modulePath exe
+          -> Just (modulePath exe -<.> "o")
+        _ -> Nothing
     leafRule_maybe (rId, r) =
       if any ((r `ruleOutputsLocation`) . (compAutogenDir,)) autogenModPaths
-         || any ((r `ruleOutputsLocation`) . (compBuildDir,)) extraObjs
+         || any ((r `ruleOutputsLocation`) . (compBuildDir,)) (extraObjs ++ maybeToList mainObj)
         then vertexFromRuleId rId
         else Nothing
     leafRules = mapMaybe leafRule_maybe allRules
@@ -1011,7 +1019,10 @@ executeRules verbosity lbi tgtInfo rulesFromInputs inputs = do
 
 -- | Does the rule output the given location?
 ruleOutputsLocation :: Rule -> Location -> Bool
-ruleOutputsLocation (Rule{results = rs}) fp = any (== fp) rs
+ruleOutputsLocation (Rule{results = rs}) fp
+  = any ((== normaliseLoc fp) . normaliseLoc) rs
+  where
+    normaliseLoc (a,b) = (normalise a, normalise b)
 
 -- | Is the file we depend on missing?
 missingDep :: Location -> IO Bool
