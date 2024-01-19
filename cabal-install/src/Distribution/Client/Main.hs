@@ -1484,6 +1484,7 @@ actAsSetupAction actAsSetupFlags args _globalFlags =
             Simple.autoconfUserHooks
             args
         Make -> Make.defaultMainArgs args
+        Hooks -> error "actAsSetupAction Hooks"
         Custom -> error "actAsSetupAction Custom"
 
 manpageAction :: [CommandSpec action] -> ManpageFlags -> [String] -> Action
