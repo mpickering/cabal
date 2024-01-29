@@ -1240,14 +1240,16 @@ planPackages
           -- installed for global packages, or prefer latest even for
           -- global packages. Perhaps should be configurable but with a
           -- different name than "upgrade-dependencies".
-          . setPreferenceDefault
+          -- TODO MP: This part is wrong, need to decide interaction of `--prefer-oldest` and `--upgrade-dependencies"
+{-          . setPreferenceDefault
             ( if Cabal.asBool solverSettingPreferOldest
                 then PreferAllOldest
                 else PreferLatestForSelected
             )
-          {-(if solverSettingUpgradeDeps
+            -}
+          . setPreferenceDefault (if solverSettingUpgradeDeps
                then PreferAllLatest
-               else PreferLatestForSelected)-}
+               else PreferLatestForSelected)
 
           . removeLowerBounds solverSettingAllowOlder
           . removeUpperBounds solverSettingAllowNewer

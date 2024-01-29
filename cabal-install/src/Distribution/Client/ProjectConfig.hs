@@ -338,7 +338,7 @@ resolveSolverSettings
       -- solverSettingReinstall         = fromFlag projectConfigReinstall
       -- solverSettingAvoidReinstalls   = fromFlag projectConfigAvoidReinstalls
       -- solverSettingOverrideReinstall = fromFlag projectConfigOverrideReinstall
-      -- solverSettingUpgradeDeps       = fromFlag projectConfigUpgradeDeps
+      solverSettingUpgradeDeps       = fromFlag projectConfigUpgradeDeps
 
       ProjectConfigShared{..} = defaults <> projectConfigShared
 

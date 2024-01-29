@@ -226,7 +226,7 @@ data ProjectConfigShared = ProjectConfigShared
   -- projectConfigReinstall         :: Flag Bool,
   -- projectConfigAvoidReinstalls   :: Flag Bool,
   -- projectConfigOverrideReinstall :: Flag Bool,
-  -- projectConfigUpgradeDeps       :: Flag Bool
+  , projectConfigUpgradeDeps       :: Flag Bool
   }
   deriving (Eq, Show, Generic)
 
@@ -427,7 +427,7 @@ data SolverSettings = SolverSettings
   -- solverSettingReinstall         :: Bool,
   -- solverSettingAvoidReinstalls   :: Bool,
   -- solverSettingOverrideReinstall :: Bool,
-  -- solverSettingUpgradeDeps       :: Bool
+  , solverSettingUpgradeDeps       :: Bool
   }
   deriving (Eq, Show, Generic, Typeable)
 

@@ -667,6 +667,7 @@ convertLegacyAllPackageFlags globalFlags configFlags configExFlags installFlags 
       installStrongFlags = projectConfigStrongFlags
       , installAllowBootLibInstalls = projectConfigAllowBootLibInstalls
       , installOnlyConstrained = projectConfigOnlyConstrained
+      , installUpgradeDeps     = projectConfigUpgradeDeps
       } = installFlags
 
     ProjectFlags
