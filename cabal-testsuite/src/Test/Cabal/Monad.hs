@@ -248,10 +248,12 @@ runTestM mode m = withSystemTempDirectory "cabal-testsuite" $ \tmp_dir -> do
     -- Reconfigure according to user flags
     let cargs = testCommonArgs args
 
+    let ghc_path = case argGhcPath cargs of
+                    Just p -> p
+                    Nothing -> programPath (fromJust $ lookupProgram ghcProgram program_db0)
+
     -- Reconfigure GHC
-    (comp, platform, program_db2) <- case argGhcPath cargs of
-        Nothing -> return (runnerCompiler senv, runnerPlatform senv, program_db0)
-        Just ghc_path -> do
+    (comp, platform, program_db2) <- do
             -- All the things that get updated paths from
             -- configCompilerEx.  The point is to make sure
             -- we reconfigure these when we need them.
