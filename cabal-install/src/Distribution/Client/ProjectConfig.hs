@@ -1509,7 +1509,8 @@ readSourcePackageCabalFile
   -> FilePath
   -> BS.ByteString
   -> IO GenericPackageDescription
-readSourcePackageCabalFile verbosity pkgfilename content =
+readSourcePackageCabalFile verbosity pkgfilename content = do
+  print pkgfilename
   case runParseResult (parseGenericPackageDescription content) of
     (warnings, Right pkg) -> do
       unless (null warnings) $

@@ -1,4 +1,4 @@
-Cabal-Version:      2.2
+Cabal-Version:      2.4
 
 Name:               cabal-install
 Version:            3.11.0.0
@@ -20,6 +20,17 @@ Extra-Source-Files:
   README.md
   bash-completion/cabal
   changelog
+data-files:
+  Cabal/**/*.hs
+  Cabal-syntax/**/*.hs
+  Cabal-syntax/**/*.x
+  Cabal-syntax/**/*.md
+  Cabal-syntax/**/*.cabal
+  Cabal/**/*.cabal
+  Cabal/**/*.md
+  Cabal/LICENSE
+  Cabal/Setup.hs
+
 
 source-repository head
   type:     git

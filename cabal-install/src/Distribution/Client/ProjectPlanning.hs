@@ -212,6 +212,8 @@ import System.FilePath
 import Text.PrettyPrint (colon, comma, fsep, hang, punctuate, quotes, text, vcat, ($$))
 import qualified Text.PrettyPrint as Disp
 
+import Paths_cabal_install
+
 -- | Check that an 'ElaboratedConfiguredPackage' actually makes
 -- sense under some 'ElaboratedSharedConfig'.
 sanityCheckElaboratedConfiguredPackage
@@ -406,6 +408,13 @@ rebuildProjectConfig
       phaseReadProjectConfig = do
         readProjectConfig verbosity httpTransport projectConfigIgnoreProject projectConfigConfigFile distDirLayout
 
+      getCabalLocations = do
+        d <- liftIO getDataDir
+        return [ ProjectPackageLocalDirectory (d </> "Cabal") (d </> "Cabal" </> "Cabal.cabal")
+               , ProjectPackageLocalDirectory (d </> "Cabal-syntax") (d </> "Cabal-syntax" </> "Cabal-syntax.cabal") ]
+
+
+
       -- Look for all the cabal packages in the project
       -- some of which may be local src dirs, tarballs etc
       --
@@ -420,6 +429,8 @@ rebuildProjectConfig
           , projectConfigBuildOnly
           } = do
           pkgLocations <- findProjectPackages distDirLayout projectConfig
+
+          default_cabal_locations <- getCabalLocations
           -- Create folder only if findProjectPackages did not throw a
           -- BadPackageLocations exception.
           liftIO $ do
@@ -431,7 +442,7 @@ rebuildProjectConfig
             distDirLayout
             projectConfigShared
             projectConfigBuildOnly
-            pkgLocations
+            (pkgLocations ++ default_cabal_locations)
 
 configureCompiler
   :: Verbosity
