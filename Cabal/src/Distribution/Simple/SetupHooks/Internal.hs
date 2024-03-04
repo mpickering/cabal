@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
@@ -106,6 +107,11 @@ import Distribution.Simple.SetupHooks.Rule
 import qualified Distribution.Simple.SetupHooks.Rule as Rule
 import Distribution.Simple.Utils
 import Distribution.System (Platform (..))
+import Distribution.Utils.Path
+  ( SymbolicPath
+  , getSymbolicPath
+  , FileOrDir(..)
+  )
 
 import qualified Distribution.Types.BuildInfo.Lens as BI (buildInfo)
 import Distribution.Types.LocalBuildConfig as LBC
@@ -419,7 +425,7 @@ buildingWhatVerbosity = \case
   BuildHaddock flags -> fromFlag $ haddockVerbosity flags
   BuildHscolour flags -> fromFlag $ hscolourVerbosity flags
 
-buildingWhatDistPref :: BuildingWhat -> FilePath
+buildingWhatDistPref :: BuildingWhat -> SymbolicPath "Package" (Dir "Dist")
 buildingWhatDistPref = \case
   BuildNormal flags -> fromFlag $ buildDistPref flags
   BuildRepl flags -> fromFlag $ replDistPref flags
@@ -980,7 +986,7 @@ executeRules verbosity lbi tgtInfo rulesFromInputs inputs = do
                 errorOut $ MissingRuleOutputs r missingResults
   where
     clbi = targetCLBI tgtInfo
-    compAutogenDir = autogenComponentModulesDir lbi clbi
+    compAutogenDir = getSymbolicPath $ autogenComponentModulesDir lbi clbi
     errorOut e =
       dieWithException verbosity $
         SetupHooksException $

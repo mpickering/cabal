@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- |
@@ -85,6 +86,7 @@ import Distribution.Types.ComponentLocalBuildInfo
 import Distribution.Types.LocalBuildInfo
 import Distribution.Types.TargetInfo
 import Distribution.Utils.Json
+import Distribution.Utils.Path
 import Distribution.Verbosity
 
 -- | Construct a JSON document describing the build information for a
@@ -147,7 +149,7 @@ mkComponentInfo wdir pkg_descr lbi clbi =
       , "unit-id" .= JsonString (prettyShow $ componentUnitId clbi)
       , "compiler-args" .= JsonArray (map JsonString compilerArgs)
       , "modules" .= JsonArray (map (JsonString . display) modules)
-      , "src-files" .= JsonArray (map JsonString sourceFiles)
+      , "src-files" .= JsonArray (map (JsonString . getSymbolicPath) sourceFiles)
       , "hs-src-dirs" .= JsonArray (map (JsonString . prettyShow) $ hsSourceDirs bi)
       , "src-dir" .= JsonString (addTrailingPathSeparator wdir)
       ]
@@ -188,7 +190,7 @@ mkComponentInfo wdir pkg_descr lbi clbi =
         BenchmarkUnsupported _ -> []
       CFLib _ -> []
     cabalFile
-      | Just fp <- pkgDescrFile lbi = [("cabal-file", JsonString fp)]
+      | Just fp <- pkgDescrFile lbi = [("cabal-file", JsonString $ getSymbolicPath fp)]
       | otherwise = []
 
 -- | Get the command-line arguments that would be passed
@@ -214,4 +216,6 @@ getCompilerArgs bi lbi clbi =
     -- This is absolutely awful
     ghc = GHC.renderGhcOptions (compiler lbi) (hostPlatform lbi) baseOpts
       where
-        baseOpts = GHC.componentGhcOptions normal lbi bi clbi (buildDir lbi)
+        baseOpts =
+          GHC.componentGhcOptions normal lbi bi clbi $
+            buildDir lbi

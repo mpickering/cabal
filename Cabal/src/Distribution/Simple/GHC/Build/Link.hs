@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 
 module Distribution.Simple.GHC.Build.Link where
@@ -35,15 +36,27 @@ import qualified Distribution.Simple.Program.Ar as Ar
 import Distribution.Simple.Program.GHC
 import qualified Distribution.Simple.Program.Ld as Ld
 import Distribution.Simple.Setup.Common
+import Distribution.Simple.Setup.Config
 import Distribution.Simple.Setup.Repl
 import Distribution.Simple.Utils
 import Distribution.System
 import Distribution.Types.ComponentLocalBuildInfo
 import Distribution.Utils.NubList
+import Distribution.Utils.Path
 import Distribution.Verbosity
 import Distribution.Version
+
 import System.Directory
+  ( createDirectoryIfMissing
+  , doesDirectoryExist
+  , doesFileExist
+  , removeFile
+  , renameFile
+  )
 import System.FilePath
+  ( isRelative
+  , replaceExtension
+  )
 
 -- | Links together the object files of the Haskell modules and extra sources
 -- using the context in which the component is being built.
@@ -54,11 +67,11 @@ linkOrLoadComponent
   -- ^ The configured GHC program that will be used for linking
   -> PackageDescription
   -- ^ The package description containing the component being built
-  -> [FilePath]
+  -> [SymbolicPath "Package" (File "Source")]
   -- ^ The full list of extra build sources (all C, C++, Js,
   -- Asm, and Cmm sources), which were compiled to object
   -- files.
-  -> (FilePath, FilePath)
+  -> (SymbolicPath "Package" (Dir "Artifacts"), SymbolicPath "Package" (Dir "Build"))
   -- ^ The build target dir, and the target dir.
   -- See Note [Build Target Dir vs Target Dir] in Distribution.Simple.GHC.Build
   -> (Set.Set BuildWay, BuildWay -> GhcOptions)
@@ -77,13 +90,23 @@ linkOrLoadComponent ghcProg pkg_descr extraSources (buildTargetDir, targetDir) (
     lbi = localBuildInfo pbci
     bi = buildBI pbci
     clbi = buildCLBI pbci
+    mbWorkDir = mbWorkDirLBI lbi
+
+    -- See Note [Symbolic paths] in Distribution.Utils.Path
+    i = interpretSymbolicPathLBI lbi
+    u :: SymbolicPathX allowAbs "Package" to -> FilePath
+    u = getSymbolicPath
 
   -- ensure extra lib dirs exist before passing to ghc
-  cleanedExtraLibDirs <- liftIO $ filterM doesDirectoryExist (extraLibDirs bi)
-  cleanedExtraLibDirsStatic <- liftIO $ filterM doesDirectoryExist (extraLibDirsStatic bi)
+  cleanedExtraLibDirs <- liftIO $ filterM (doesDirectoryExist . i) (extraLibDirs bi)
+  cleanedExtraLibDirsStatic <- liftIO $ filterM (doesDirectoryExist . i) (extraLibDirsStatic bi)
 
   let
-    extraSourcesObjs = map (`replaceExtension` objExtension) extraSources
+    extraSourcesObjs :: [RelativePath "Artifacts" (File "Object")]
+    extraSourcesObjs =
+      [ makeRelativePathEx $ getSymbolicPath src `replaceExtension` objExtension
+      | src <- extraSources
+      ]
 
     -- TODO: Shouldn't we use withStaticLib for libraries and something else
     -- for foreign libs in the three cases where we use `withFullyStaticExe` below?
@@ -107,11 +130,15 @@ linkOrLoadComponent ghcProg pkg_descr extraSources (buildTargetDir, targetDir) (
         , ghcOptLinkLibPath =
             toNubListR $
               if withFullyStaticExe lbi
-                then cleanedExtraLibDirsStatic
-                else cleanedExtraLibDirs
-        , ghcOptLinkFrameworks = toNubListR $ PD.frameworks bi
-        , ghcOptLinkFrameworkDirs = toNubListR $ PD.extraFrameworkDirs bi
-        , ghcOptInputFiles = toNubListR [buildTargetDir </> x | x <- extraSourcesObjs]
+                then map u cleanedExtraLibDirsStatic
+                else map u cleanedExtraLibDirs
+        , ghcOptLinkFrameworks = toNubListR $ map getSymbolicPath $ PD.frameworks bi
+        , ghcOptLinkFrameworkDirs = toNubListR $ map u $ PD.extraFrameworkDirs bi
+        , ghcOptInputFiles =
+            toNubListR
+              [ i $ buildTargetDir </> obj
+              | obj <- extraSourcesObjs
+              ]
         , ghcOptNoLink = Flag False
         , ghcOptRPaths = rpaths
         }
@@ -155,7 +182,7 @@ linkOrLoadComponent ghcProg pkg_descr extraSources (buildTargetDir, targetDir) (
       runReplOrWriteFlags ghcProg lbi replFlags replOpts (pkgName (PD.package pkg_descr)) target
     _otherwise ->
       let
-        runGhcProg = runGHC verbosity ghcProg comp platform
+        runGhcProg = runGHC verbosity ghcProg comp platform mbWorkDir
         platform = hostPlatform lbi
         comp = compiler lbi
        in
@@ -174,9 +201,9 @@ linkOrLoadComponent ghcProg pkg_descr extraSources (buildTargetDir, targetDir) (
 
 -- | Link a library component
 linkLibrary
-  :: FilePath
+  :: SymbolicPath "Package" (Dir "Artifacts")
   -- ^ The library target build directory
-  -> [FilePath]
+  -> [SymbolicPath "Package" (Dir "Lib")]
   -- ^ The list of extra lib dirs that exist (aka "cleaned")
   -> PackageDescription
   -- ^ The package description containing this library
@@ -186,15 +213,24 @@ linkLibrary
   -> Library
   -> LocalBuildInfo
   -> ComponentLocalBuildInfo
-  -> [FilePath]
+  -> [SymbolicPath "Package" (File "Source")]
   -- ^ Extra build sources (that were compiled to objects)
   -> NubListR FilePath
   -- ^ A list with the runtime-paths (rpaths), or empty if not linking dynamically
   -> Set.Set BuildWay
   -- ^ Wanted build ways and corresponding build options
   -> IO ()
-linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg lib lbi clbi extraSources rpaths wantedWays = do
+linkLibrary buildTargetSymbolicDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg lib lbi clbi extraSources rpaths wantedWays = do
   let
+    common = configCommonFlags $ configFlags lbi
+    mbWorkDir = flagToMaybe $ setupWorkingDir common
+
+    -- See Note [Symbolic paths] in Distribution.Utils.Path
+    i = interpretSymbolicPath mbWorkDir
+    u :: SymbolicPathX allowAbs "Package" to -> FilePath
+    u = getSymbolicPath
+
+    buildTargetDir = i buildTargetSymbolicDir
     compiler_id = compilerId comp
     comp = compiler lbi
     ghcVersion = compilerVersion comp
@@ -202,16 +238,16 @@ linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg li
     uid = componentUnitId clbi
     libBi = libBuildInfo lib
     Platform _hostArch hostOS = hostPlatform lbi
-    vanillaLibFilePath = buildTargetDir </> mkLibName uid
-    profileLibFilePath = buildTargetDir </> mkProfLibName uid
+    vanillaLibFilePath = buildTargetSymbolicDir </> makeRelativePathEx (mkLibName uid)
+    profileLibFilePath = buildTargetSymbolicDir </> makeRelativePathEx (mkProfLibName uid)
     sharedLibFilePath =
       buildTargetDir
         </> mkSharedLibName (hostPlatform lbi) compiler_id uid
     staticLibFilePath =
       buildTargetDir
         </> mkStaticLibName (hostPlatform lbi) compiler_id uid
-    ghciLibFilePath = buildTargetDir </> Internal.mkGHCiLibName uid
-    ghciProfLibFilePath = buildTargetDir </> Internal.mkGHCiProfLibName uid
+    ghciLibFilePath = buildTargetSymbolicDir </> makeRelativePathEx (Internal.mkGHCiLibName uid)
+    ghciProfLibFilePath = buildTargetSymbolicDir </> makeRelativePathEx (Internal.mkGHCiProfLibName uid)
     libInstallPath =
       libdir $
         absoluteComponentInstallDirs
@@ -235,15 +271,18 @@ linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg li
             True
         , pure $
             map (buildTargetDir </>) $
-              map ((`replaceExtension` (buildWayPrefix way ++ objExtension))) extraSources
-        , catMaybes
+              map ((`replaceExtension` (buildWayPrefix way ++ objExtension)) . u) extraSources
+        , fmap u . catMaybes
             <$> sequenceA
-              [ findFileWithExtension
+              [ findFileCwdWithExtension
+                mbWorkDir
                 [Suffix $ buildWayPrefix way ++ objExtension]
-                [buildTargetDir]
-                (ModuleName.toFilePath x ++ "_stub")
+                [buildTargetSymbolicDir]
+                xPath
               | ghcVersion < mkVersion [7, 2] -- ghc-7.2+ does not make _stub.o files
               , x <- allLibModules lib clbi
+              , let xPath :: RelativePath "Artifacts" (File "Source")
+                    xPath = makeRelativePathEx $ ModuleName.toFilePath x ++ "_stub"
               ]
         ]
 
@@ -306,10 +345,10 @@ linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg li
               then toFlag sharedLibInstallPath
               else mempty
         , ghcOptLinkLibs = extraLibs libBi
-        , ghcOptLinkLibPath = toNubListR $ cleanedExtraLibDirs
-        , ghcOptLinkFrameworks = toNubListR $ PD.frameworks libBi
+        , ghcOptLinkLibPath = toNubListR $ map u $ cleanedExtraLibDirs
+        , ghcOptLinkFrameworks = toNubListR $ map getSymbolicPath $ PD.frameworks libBi
         , ghcOptLinkFrameworkDirs =
-            toNubListR $ PD.extraFrameworkDirs libBi
+            toNubListR $ map u $ PD.extraFrameworkDirs libBi
         , ghcOptRPaths = rpaths
         }
     ghcStaticLinkArgs staticObjectFiles =
@@ -319,7 +358,7 @@ linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg li
         , ghcOptOutputFile = toFlag staticLibFilePath
         , ghcOptLinkLibs = extraLibs libBi
         , -- TODO: Shouldn't this use cleanedExtraLibDirsStatic instead?
-          ghcOptLinkLibPath = toNubListR $ cleanedExtraLibDirs
+          ghcOptLinkLibPath = toNubListR $ map u $ cleanedExtraLibDirs
         }
 
   staticObjectFiles <- getObjFiles StaticWay
@@ -359,7 +398,7 @@ linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg li
   -- This would be simpler by not adding every object to the invocation, and
   -- rather using module names.
   unless (null staticObjectFiles) $ do
-    info verbosity (show (ghcOptPackages (Internal.componentGhcOptions verbosity lbi libBi clbi buildTargetDir)))
+    info verbosity (show (ghcOptPackages (Internal.componentGhcOptions verbosity lbi libBi clbi buildTargetSymbolicDir)))
     traverse_ linkWay wantedWays
 
 -- | Link the executable resulting from building this component, be it an
@@ -370,7 +409,7 @@ linkExecutable
   -> (Set.Set BuildWay, BuildWay -> GhcOptions)
   -- ^ The wanted build ways and corresponding GhcOptions that were
   -- used to compile the modules in that way.
-  -> FilePath
+  -> SymbolicPath "Package" (Dir "Build")
   -- ^ The target dir (2024-01:note: not the same as build target
   -- dir, see Note [Build Target Dir vs Target Dir] in Distribution.Simple.GHC.Build)
   -> UnqualComponentName
@@ -396,7 +435,9 @@ linkExecutable linkerOpts (wantedWays, buildOpts) targetDir targetName runGhcPro
 
       -- Work around old GHCs not relinking in this
       -- situation, see #3294
-      let target = targetDir </> exeTargetName (hostPlatform lbi) targetName
+      let target =
+            interpretSymbolicPathLBI lbi $
+              targetDir </> makeRelativePathEx (exeTargetName (hostPlatform lbi) targetName)
       when (compilerVersion comp < mkVersion [7, 7]) $ do
         e <- doesFileExist target
         when e (removeFile target)
@@ -412,15 +453,16 @@ linkFLib
   -> (Set.Set BuildWay, BuildWay -> GhcOptions)
   -- ^ The wanted build ways and corresponding GhcOptions that were
   -- used to compile the modules in that way.
-  -> FilePath
+  -> SymbolicPath "Package" (Dir "Build")
   -- ^ The target dir (2024-01:note: not the same as build target
   -- dir, see Note [Build Target Dir vs Target Dir] in Distribution.Simple.GHC.Build)
   -> (GhcOptions -> IO ())
   -- ^ Run the configured GHC program
   -> IO ()
-linkFLib flib bi lbi linkerOpts (wantedWays, buildOpts) targetDir runGhcProg = do
+linkFLib flib bi lbi linkerOpts (wantedWays, buildOpts) targetDirSymbolic runGhcProg = do
   let
     comp = compiler lbi
+    targetDir = interpretSymbolicPathLBI lbi targetDirSymbolic
 
     -- Instruct GHC to link against libHSrts.
     rtsLinkOpts :: GhcOptions
@@ -460,7 +502,7 @@ linkFLib flib bi lbi linkerOpts (wantedWays, buildOpts) targetDir runGhcProg = d
             { ghcOptLinkNoHsMain = toFlag True
             , ghcOptShared = toFlag True
             , ghcOptFPic = toFlag True
-            , ghcOptLinkModDefFiles = toNubListR $ foreignLibModDefFile flib
+            , ghcOptLinkModDefFiles = toNubListR $ fmap getSymbolicPath $ foreignLibModDefFile flib
             }
       ForeignLibNativeStatic ->
         -- this should be caught by buildFLib
@@ -534,7 +576,9 @@ getRPaths pbci = do
             OSX -> "@loader_path"
             _ -> "$ORIGIN"
           relPath p = if isRelative p then hostPref </> p else p
-          rpaths = toNubListR (map relPath libraryPaths) <> toNubListR (extraLibDirs bi)
+          rpaths =
+            toNubListR (map relPath libraryPaths)
+              <> toNubListR (map getSymbolicPath $ extraLibDirs bi)
       return rpaths
     else return mempty
 
@@ -628,10 +672,12 @@ runReplOrWriteFlags ghcProg lbi rflags ghcOpts pkg_name target =
       clbi = targetCLBI target
       comp = compiler lbi
       platform = hostPlatform lbi
+      common = configCommonFlags $ configFlags lbi
+      mbWorkDir = mbWorkDirLBI lbi
+      verbosity = fromFlag $ setupVerbosity common
    in case replOptionsFlagOutput (replReplOptions rflags) of
-        NoFlag -> runGHC (fromFlag $ replVerbosity rflags) ghcProg comp platform ghcOpts
+        NoFlag -> runGHC verbosity ghcProg comp platform mbWorkDir ghcOpts
         Flag out_dir -> do
-          src_dir <- getCurrentDirectory
           let uid = componentUnitId clbi
               this_unit = prettyShow uid
               reexported_modules = [mn | LibComponentLocalBuildInfo{} <- [clbi], IPI.ExposedModule mn (Just{}) <- componentExposedModules clbi]
@@ -639,7 +685,9 @@ runReplOrWriteFlags ghcProg lbi rflags ghcOpts pkg_name target =
               extra_opts =
                 concat $
                   [ ["-this-package-name", prettyShow pkg_name]
-                  , ["-working-dir", src_dir]
+                  , case mbWorkDir of
+                      Nothing -> []
+                      Just wd -> ["-working-dir", getSymbolicPath wd]
                   ]
                     ++ [ ["-reexported-module", prettyShow m] | m <- reexported_modules
                        ]

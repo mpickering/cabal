@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -29,6 +30,7 @@ import Prelude ()
 
 import Distribution.ModuleName (ModuleName)
 import Distribution.Pretty
+import Distribution.Utils.Path
 import Distribution.Verbosity
 import qualified Text.PrettyPrint as Disp
 
@@ -79,7 +81,7 @@ data PreProcessor = PreProcessor
 
     ppOrdering
       :: Verbosity
-      -> [FilePath] -- Source directories
+      -> [SymbolicPath "Package" (Dir "Source")] -- Source directories
       -> [ModuleName] -- Module names
       -> IO [ModuleName] -- Sorted modules
 

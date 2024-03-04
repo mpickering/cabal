@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 
@@ -19,31 +20,38 @@ import Prelude ()
 
 import Distribution.Compat.Prelude
 import Distribution.Simple.Utils (TempFileOptions, debug, withTempFileEx)
+import Distribution.Utils.Path
 import Distribution.Verbosity
 
 withResponseFile
   :: Verbosity
   -> TempFileOptions
-  -> FilePath
-  -- ^ Working directory to create response file in.
-  -> FilePath
+  -> Maybe (SymbolicPath "CWD" (Dir "Package"))
+  -- ^ Working directory
+  -> SymbolicPath "Package" (Dir "Response")
+  -- ^ Directory to create response file in.
+  -> String
   -- ^ Template for response file name.
   -> Maybe TextEncoding
   -- ^ Encoding to use for response file contents.
   -> [String]
   -- ^ Arguments to put into response file.
-  -> (FilePath -> IO a)
+  -> (SymbolicPath "Package" (File "Response") -> IO a)
   -> IO a
-withResponseFile verbosity tmpFileOpts workDir fileNameTemplate encoding arguments f =
-  withTempFileEx tmpFileOpts workDir fileNameTemplate $ \responseFileName hf -> do
+withResponseFile verbosity tmpFileOpts mbWorkDir responseDir fileNameTemplate encoding arguments f = do
+  withTempFileEx tmpFileOpts mbWorkDir responseDir fileNameTemplate $ \responseFileName hf -> do
     traverse_ (hSetEncoding hf) encoding
     let responseContents = unlines $ map escapeResponseFileArg arguments
     hPutStr hf responseContents
     hClose hf
-    debug verbosity $ responseFileName ++ " contents: <<<"
+    debug verbosity $ u responseFileName ++ " contents: <<<"
     debug verbosity responseContents
-    debug verbosity $ ">>> " ++ responseFileName
+    debug verbosity $ ">>> " ++ u responseFileName
     f responseFileName
+  where
+    -- See Note [Symbolic paths] in Distribution.Utils.Path
+    u :: SymbolicPath "Package" to -> FilePath
+    u = getSymbolicPath
 
 -- Support a gcc-like response file syntax.  Each separate
 -- argument and its possible parameter(s), will be separated in the

@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NamedFieldPuns #-}
@@ -43,11 +44,9 @@ import Distribution.Simple.Compiler
   ( CompilerFlavor (..)
   , compilerFlavor
   )
-import Distribution.Simple.Flag
-  ( fromFlag
-  )
 import Distribution.Simple.Glob (matchDirFileGlob)
 import Distribution.Simple.LocalBuildInfo
+import Distribution.Simple.Setup.Config
 import Distribution.Simple.Setup.Copy
   ( CopyFlags (..)
   )
@@ -68,13 +67,14 @@ import Distribution.Simple.Utils
   , noticeNoWrap
   , warn
   )
-import Distribution.Utils.Path (getSymbolicPath)
+import Distribution.Utils.Path
 
 import Distribution.Compat.Graph (IsNode (..))
 import Distribution.Simple.Errors
 import qualified Distribution.Simple.GHC as GHC
 import qualified Distribution.Simple.GHCJS as GHCJS
 import qualified Distribution.Simple.HaskellSuite as HaskellSuite
+import Distribution.Simple.Setup.Common
 import qualified Distribution.Simple.UHC as UHC
 
 import System.Directory
@@ -82,10 +82,8 @@ import System.Directory
   , doesFileExist
   )
 import System.FilePath
-  ( isRelative
-  , takeDirectory
+  ( takeDirectory
   , takeFileName
-  , (</>)
   )
 
 import Distribution.Pretty
@@ -123,7 +121,7 @@ install_setupHooks
   lbi
   flags = do
     checkHasLibsOrExes
-    targets <- readTargetInfos verbosity pkg_descr lbi (copyArgs flags)
+    targets <- readTargetInfos verbosity pkg_descr lbi (copyTargets flags)
 
     copyPackage verbosity pkg_descr lbi distPref copydest
 
@@ -154,7 +152,7 @@ copyPackage
   :: Verbosity
   -> PackageDescription
   -> LocalBuildInfo
-  -> FilePath
+  -> SymbolicPath "Package" (Dir "Dist")
   -> CopyDest
   -> IO ()
 copyPackage verbosity pkg_descr lbi distPref copydest = do
@@ -167,17 +165,19 @@ copyPackage verbosity pkg_descr lbi distPref copydest = do
       , htmldir = htmlPref
       , haddockdir = interfacePref
       } = absoluteInstallCommandDirs pkg_descr lbi (localUnitId lbi) copydest
+    mbWorkDir = mbWorkDirLBI lbi
+    i = interpretSymbolicPath mbWorkDir -- See Note [Symbolic paths] in Distribution.Utils.Path
 
   -- Install (package-global) data files
-  installDataFiles verbosity pkg_descr dataPref
+  installDataFiles verbosity mbWorkDir pkg_descr $ makeSymbolicPath dataPref
 
   -- Install (package-global) Haddock files
   -- TODO: these should be done per-library
-  docExists <- doesDirectoryExist $ haddockPref ForDevelopment distPref pkg_descr
+  docExists <- doesDirectoryExist $ i $ haddockPref ForDevelopment distPref pkg_descr
   info
     verbosity
     ( "directory "
-        ++ haddockPref ForDevelopment distPref pkg_descr
+        ++ getSymbolicPath (haddockPref ForDevelopment distPref pkg_descr)
         ++ " does exist: "
         ++ show docExists
     )
@@ -188,7 +188,7 @@ copyPackage verbosity pkg_descr lbi distPref copydest = do
     createDirectoryIfMissingVerbose verbosity True htmlPref
     installDirectoryContents
       verbosity
-      (haddockPref ForDevelopment distPref pkg_descr)
+      (i $ haddockPref ForDevelopment distPref pkg_descr)
       htmlPref
     -- setPermissionsRecursive [Read] htmlPref
     -- The haddock interface file actually already got installed
@@ -197,25 +197,26 @@ copyPackage verbosity pkg_descr lbi distPref copydest = do
     -- copy in htmlPref first.
     let haddockInterfaceFileSrc =
           haddockPref ForDevelopment distPref pkg_descr
-            </> haddockName pkg_descr
+            </> makeRelativePathEx (haddockName pkg_descr)
         haddockInterfaceFileDest = interfacePref </> haddockName pkg_descr
     -- We only generate the haddock interface file for libs, So if the
     -- package consists only of executables there will not be one:
-    exists <- doesFileExist haddockInterfaceFileSrc
+    exists <- doesFileExist $ i haddockInterfaceFileSrc
     when exists $ do
       createDirectoryIfMissingVerbose verbosity True interfacePref
       installOrdinaryFile
         verbosity
-        haddockInterfaceFileSrc
+        (i haddockInterfaceFileSrc)
         haddockInterfaceFileDest
 
   let lfiles = licenseFiles pkg_descr
   unless (null lfiles) $ do
     createDirectoryIfMissingVerbose verbosity True docPref
-    for_ lfiles $ \lfile' -> do
-      let lfile :: FilePath
-          lfile = getSymbolicPath lfile'
-      installOrdinaryFile verbosity lfile (docPref </> takeFileName lfile)
+    for_ lfiles $ \lfile -> do
+      installOrdinaryFile
+        verbosity
+        (i lfile)
+        (docPref </> takeFileName (getSymbolicPath lfile))
 
 -- | Copy files associated with a component.
 copyComponent
@@ -232,7 +233,7 @@ copyComponent verbosity pkg_descr lbi (CLib lib) clbi copydest = do
         , dynlibdir = dynlibPref
         , includedir = incPref
         } = absoluteInstallCommandDirs pkg_descr lbi (componentUnitId clbi) copydest
-      buildPref = componentBuildDir lbi clbi
+      buildPref = interpretSymbolicPathLBI lbi $ componentBuildDir lbi clbi
 
   case libName lib of
     LMainLibName -> noticeNoWrap verbosity ("Installing library in " ++ libPref)
@@ -263,7 +264,7 @@ copyComponent verbosity pkg_descr lbi (CFLib flib) clbi copydest = do
         { flibdir = flibPref
         , includedir = incPref
         } = absoluteComponentInstallDirs pkg_descr lbi (componentUnitId clbi) copydest
-      buildPref = componentBuildDir lbi clbi
+      buildPref = interpretSymbolicPathLBI lbi $ componentBuildDir lbi clbi
 
   noticeNoWrap verbosity ("Installing foreign library " ++ unUnqualComponentName (foreignLibName flib) ++ " in " ++ flibPref)
   installIncludeFiles verbosity (foreignLibBuildInfo flib) lbi buildPref incPref
@@ -276,7 +277,7 @@ copyComponent verbosity pkg_descr lbi (CExe exe) clbi copydest = do
   let installDirs = absoluteComponentInstallDirs pkg_descr lbi (componentUnitId clbi) copydest
       -- the installers know how to find the actual location of the
       -- binaries
-      buildPref = buildDir lbi
+      buildPref = interpretSymbolicPathLBI lbi $ buildDir lbi
       uid = componentUnitId clbi
       pkgid = packageId pkg_descr
       binPref
@@ -312,44 +313,59 @@ copyComponent verbosity pkg_descr lbi (CExe exe) clbi copydest = do
 copyComponent _ _ _ (CBench _) _ _ = return ()
 copyComponent _ _ _ (CTest _) _ _ = return ()
 
--- | Install the files listed in data-files.
-installDataFiles :: Verbosity -> PackageDescription -> FilePath -> IO ()
-installDataFiles verbosity pkg_descr destDataDir =
+-- | Install the files listed in data-files
+installDataFiles
+  :: Verbosity
+  -> Maybe (SymbolicPath "CWD" (Dir "Package"))
+  -> PackageDescription
+  -> SymbolicPath "Package" (Dir "Data")
+  -> IO ()
+installDataFiles verbosity mbWorkDir pkg_descr destDataDir =
   traverse_
-    (installFileGlob verbosity (specVersion pkg_descr) (srcDataDir, destDataDir))
+    (installFileGlob verbosity mbWorkDir (specVersion pkg_descr) (srcDataDir, destDataDir))
     (dataFiles pkg_descr)
   where
     srcDataDirRaw = dataDir pkg_descr
-    srcDataDir =
-      if null srcDataDirRaw
-        then "."
-        else srcDataDirRaw
+    srcDataDir :: SymbolicPath "Package" (Dir "Data")
+    srcDataDir
+      | null $ getSymbolicPath srcDataDirRaw = sameDirectory
+      | otherwise = srcDataDirRaw
 
 -- | Install the files specified by the given glob pattern.
 installFileGlob
   :: Verbosity
+  -> Maybe (SymbolicPath "CWD" (Dir "Package"))
   -> CabalSpecVersion
-  -> (FilePath, FilePath)
+  -> (SymbolicPath "Package" (Dir "Data"), SymbolicPath "Package" (Dir "Data"))
   -- ^ @(src_dir, dest_dir)@
-  -> FilePath
+  -> RelativePath "Data" (File "Data")
   -- ^ file glob pattern
   -> IO ()
-installFileGlob verbosity spec_version (srcDir, destDir) glob = do
-  files <- matchDirFileGlob verbosity spec_version srcDir glob
+installFileGlob verbosity mbWorkDir spec_version (srcDir, destDir) glob = do
+  let i = interpretSymbolicPath mbWorkDir -- See Note [Symbolic paths] in Distribution.Utils.Path
+      searchDir :: SymbolicPath "CWD" (Dir "Data")
+      searchDir = case symbolicPathRelative_maybe srcDir of
+        Just relSrcDir -> fromMaybe sameDirectory mbWorkDir </> relSrcDir
+        Nothing -> unsafeCoerceSymbolicPath srcDir
+  files <- matchDirFileGlob verbosity spec_version (Just searchDir) glob
   for_ files $ \file' -> do
-    let src = srcDir </> file'
-        dst = destDir </> file'
+    let src = i (srcDir </> file')
+        dst = i (destDir </> file')
     createDirectoryIfMissingVerbose verbosity True (takeDirectory dst)
     installOrdinaryFile verbosity src dst
 
 -- | Install the files listed in install-includes for a library
 installIncludeFiles :: Verbosity -> BuildInfo -> LocalBuildInfo -> FilePath -> FilePath -> IO ()
 installIncludeFiles verbosity libBi lbi buildPref destIncludeDir = do
-  let relincdirs = "." : filter isRelative (includeDirs libBi)
+  let relincdirs = sameDirectory : mapMaybe symbolicPathRelative_maybe (includeDirs libBi)
       incdirs =
-        [baseDir lbi </> dir | dir <- relincdirs]
-          ++ [buildPref </> dir | dir <- relincdirs]
-  incs <- traverse (findInc incdirs) (installIncludes libBi)
+        [ root </> getSymbolicPath dir
+        | -- NB: both baseDir and buildPref are already interpreted,
+        -- so we don't need to interpret these paths in the call to findInc.
+        dir <- relincdirs
+        , root <- [baseDir lbi, buildPref]
+        ]
+  incs <- traverse (findInc incdirs . getSymbolicPath) (installIncludes libBi)
   sequence_
     [ do
       createDirectoryIfMissingVerbose verbosity True destDir
@@ -359,7 +375,7 @@ installIncludeFiles verbosity libBi lbi buildPref destIncludeDir = do
           destDir = takeDirectory destFile
     ]
   where
-    baseDir lbi' = fromMaybe "" (takeDirectory <$> cabalFilePath lbi')
+    baseDir lbi' = packageRoot $ configCommonFlags $ configFlags lbi'
     findInc [] file = dieWithException verbosity $ CantFindIncludeFile file
     findInc (dir : dirs) file = do
       let path = dir </> file

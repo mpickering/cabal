@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
@@ -33,16 +34,18 @@ import Distribution.Simple.Program.Run
 import Distribution.Simple.Program.Types
 import Distribution.System
 import Distribution.Types.ComponentId
+import Distribution.Types.ParStrat
 import Distribution.Utils.NubList
+import Distribution.Utils.Path
 import Distribution.Verbosity
 import Distribution.Version
+
 import Language.Haskell.Extension
 
 import Data.List (stripPrefix)
 import qualified Data.Map as Map
 import Data.Monoid (All (..), Any (..), Endo (..))
 import qualified Data.Set as Set
-import Distribution.Types.ParStrat
 
 normaliseGhcArgs :: Maybe Version -> PackageDescription -> [String] -> [String]
 normaliseGhcArgs (Just ghcVersion) PackageDescription{..} ghcArgs
@@ -612,27 +615,34 @@ runGHC
   -> ConfiguredProgram
   -> Compiler
   -> Platform
+  -> Maybe (SymbolicPath "CWD" (Dir "Package"))
   -> GhcOptions
   -> IO ()
-runGHC verbosity ghcProg comp platform opts = do
-  runProgramInvocation verbosity =<< ghcInvocation verbosity ghcProg comp platform opts
+runGHC verbosity ghcProg comp platform mbWorkDir opts = do
+  runProgramInvocation verbosity
+    =<< ghcInvocation verbosity ghcProg comp platform mbWorkDir opts
 
 ghcInvocation
   :: Verbosity
   -> ConfiguredProgram
   -> Compiler
   -> Platform
+  -> Maybe (SymbolicPath "CWD" (Dir "Package"))
   -> GhcOptions
   -> IO ProgramInvocation
-ghcInvocation verbosity ghcProg comp platform opts = do
+ghcInvocation verbosity ghcProg comp platform mbWorkDir opts = do
   -- NOTE: GHC is the only program whose path we modify with more values than
   -- the standard @extra-prog-path@, namely the folders of the executables in
   -- the components, see @componentGhcOptions@.
   let envOverrides = programOverrideEnv ghcProg
   extraPath <- getExtraPathEnv verbosity envOverrides (fromNubListR (ghcOptExtraPath opts))
   let ghcProg' = ghcProg{programOverrideEnv = envOverrides ++ extraPath}
+  return $
+    programInvocationCwd mbWorkDir ghcProg' $
+      renderGhcOptions comp platform opts
 
-  pure $ programInvocation ghcProg' (renderGhcOptions comp platform opts)
+-- TODO: use the -working-dir GHC flag instead of setting the process
+-- working directory, as this improves error messages.
 
 renderGhcOptions :: Compiler -> Platform -> GhcOptions -> [String]
 renderGhcOptions comp _platform@(Platform _arch os) opts
