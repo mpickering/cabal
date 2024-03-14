@@ -49,6 +49,7 @@ import Distribution.Client.Setup
 import Distribution.Client.SetupWrapper
   ( SetupScriptOptions (..)
   , defaultSetupScriptOptions
+  , SetupRunnerArgs(NotInLibrary)
   , setupWrapper
   )
 import Distribution.Client.SolverInstallPlan (SolverInstallPlan)
@@ -205,6 +206,7 @@ configure
           configCommonFlags
           (const configFlags)
           (const extraArgs)
+          NotInLibrary
       Right installPlan0 ->
         let installPlan = InstallPlan.configureInstallPlan configFlags installPlan0
          in case fst (InstallPlan.ready installPlan) of
@@ -507,6 +509,7 @@ configurePackage
       configCommonFlags
       configureFlags
       (const extraArgs)
+      NotInLibrary
     where
       gpkg :: PkgDesc.GenericPackageDescription
       gpkg = srcpkgDescription spkg

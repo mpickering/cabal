@@ -121,6 +121,7 @@ import qualified Distribution.Client.List as List
 import Distribution.Client.SetupWrapper
   ( SetupScriptOptions (..)
   , defaultSetupScriptOptions
+  , SetupRunnerArgs(NotInLibrary)
   , setupWrapper
   )
 import Distribution.Client.Targets
@@ -539,6 +540,7 @@ wrapperAction command getCommonFlags =
         getCommonFlags
         (const flags)
         (const extraArgs)
+        NotInLibrary
 
 configureAction
   :: (ConfigFlags, ConfigExFlags)
@@ -648,6 +650,7 @@ build verbosity config distPref buildFlags extraArgs =
     buildCommonFlags
     mkBuildFlags
     (const extraArgs)
+    NotInLibrary
   where
     progDb = defaultProgramDb
     setupOptions = defaultSetupScriptOptions{useDistPref = distPref}
@@ -741,6 +744,7 @@ replAction replFlags extraArgs globalFlags = do
           Cabal.replCommonFlags
           (const replFlags')
           (const extraArgs)
+          NotInLibrary
 
     -- No .cabal file in the current directory: just start the REPL (possibly
     -- using the sandbox package DB).
@@ -788,6 +792,7 @@ installAction (configFlags, _, installFlags, _, _, _) _ globalFlags
         (const common)
         (const (mempty, mempty, mempty, mempty, mempty, mempty))
         (const [])
+        NotInLibrary
 installAction
   ( configFlags
     , configExFlags
@@ -955,6 +960,7 @@ testAction (buildFlags, testFlags) extraArgs globalFlags = do
       Cabal.testCommonFlags
       (const testFlags')
       (const extraArgs')
+      NotInLibrary
 
 data ComponentNames
   = ComponentNamesUnknown
@@ -1076,6 +1082,7 @@ benchmarkAction
         Cabal.benchmarkCommonFlags
         (const benchmarkFlags')
         (const extraArgs')
+        NotInLibrary
 
 haddockAction :: HaddockFlags -> [String] -> Action
 haddockAction haddockFlags extraArgs globalFlags = do
@@ -1116,6 +1123,7 @@ haddockAction haddockFlags extraArgs globalFlags = do
       haddockCommonFlags
       (const haddockFlags')
       (const extraArgs)
+      NotInLibrary
     when (haddockForHackage haddockFlags == Flag ForHackage) $ do
       pkg <- fmap LBI.localPkgDescr (getPersistBuildConfig mbWorkDir distPref)
       let dest = getSymbolicPath distPref </> name <.> "tar.gz"
@@ -1151,6 +1159,7 @@ cleanAction cleanFlags extraArgs globalFlags = do
     cleanCommonFlags
     (const cleanFlags')
     (const extraArgs)
+    NotInLibrary
 
 listAction :: ListFlags -> [String] -> Action
 listAction listFlags extraArgs globalFlags = do

@@ -168,7 +168,7 @@ defaultMainWithSetupHooksArgs setupHooks =
       -> BuildFlags
       -> IO ()
     setup_buildHook pkg_descr lbi hooks flags =
-      build_setupHooks
+      void $ build_setupHooks
         (SetupHooks.buildHooks setupHooks)
         pkg_descr
         lbi
@@ -221,7 +221,7 @@ defaultMainWithSetupHooksArgs setupHooks =
       -> HaddockFlags
       -> IO ()
     setup_haddockHook pkg_descr lbi hooks flags =
-      haddock_setupHooks
+      void $ haddock_setupHooks
         (SetupHooks.buildHooks setupHooks)
         pkg_descr
         lbi

@@ -119,6 +119,7 @@ import Distribution.Client.Setup
 import Distribution.Client.SetupWrapper
   ( SetupScriptOptions (..)
   , defaultSetupScriptOptions
+  , SetupRunnerArgs(NotInLibrary)
   , setupWrapper
   )
 import Distribution.Client.SolverInstallPlan (SolverInstallPlan)
@@ -2088,6 +2089,7 @@ installUnpackedPackage
                 getCommonFlags
                 flags
                 (const [])
+                NotInLibrary
           )
 
 -- helper

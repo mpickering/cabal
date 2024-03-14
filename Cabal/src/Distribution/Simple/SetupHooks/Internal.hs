@@ -110,7 +110,7 @@ import Distribution.System (Platform (..))
 import Distribution.Utils.Path
   ( SymbolicPath
   , getSymbolicPath
-  , FileOrDir(..)
+  , FileOrDir (..)
   )
 
 import qualified Distribution.Types.BuildInfo.Lens as BI (buildInfo)
@@ -122,6 +122,7 @@ import Data.Coerce (coerce)
 import qualified Data.Graph as Graph
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
+import Data.Monoid (Ap (..))
 import qualified Data.Set as Set
 import GHC.Exts (Any)
 import Unsafe.Coerce
@@ -821,8 +822,8 @@ applyComponentDiffs verbosity f = traverseComponents apply_diff
         Just diff -> applyComponentDiff verbosity c diff
         Nothing -> return c
 
-forComponents_ :: PackageDescription -> (Component -> IO ()) -> IO ()
-forComponents_ pd f = getConst $ traverseComponents (Const . f) pd
+forComponents_ :: Applicative m => PackageDescription -> (Component -> m ()) -> m ()
+forComponents_ pd f = getAp . getConst $ traverseComponents (Const . Ap . f) pd
 
 applyComponentDiff
   :: Verbosity
@@ -858,8 +859,7 @@ applyComponentDiff verbosity comp (ComponentDiff diff)
 --------------------------------------------------------------------------------
 -- Running pre-processors and code generators
 
--- | Run all preprocessors and code generators specified in
--- 'SetupHooks'.
+-- | Run all pre-build rules.
 --
 -- This function should only be called internally within @Cabal@, as it is used
 -- to implement the (legacy) Setup.hs interface. The build tool
@@ -870,12 +870,9 @@ executeRules
   :: Verbosity
   -> LocalBuildInfo
   -> TargetInfo
-  -> Rules inputs
-  -> inputs
+  -> Map RuleId Rule
   -> IO ()
-executeRules verbosity lbi tgtInfo rulesFromInputs inputs = do
-  -- Get all the rules.
-  (allRules, _monitors) <- computeRules verbosity inputs rulesFromInputs
+executeRules verbosity lbi tgtInfo allRules = do
   -- Compute all extra dynamic dependency edges.
   dynDepsEdges <- flip Map.traverseMaybeWithKey allRules $
     \_rId (Rule{ruleCommands = cmds}) ->

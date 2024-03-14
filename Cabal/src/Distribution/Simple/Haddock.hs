@@ -54,6 +54,8 @@ import Distribution.Simple.BuildPaths
 import Distribution.Simple.BuildTarget
 import Distribution.Simple.Compiler
 import Distribution.Simple.Errors
+import Distribution.Simple.FileMonitor.Types
+  ( MonitorFilePath )
 import Distribution.Simple.Flag
 import Distribution.Simple.Glob (matchDirFileGlob)
 import Distribution.Simple.InstallDirs
@@ -73,7 +75,6 @@ import Distribution.Simple.SetupHooks.Internal
   , BuildingWhat (..)
   , noBuildHooks
   )
-import qualified Distribution.Simple.SetupHooks.Internal as SetupHooks
 import Distribution.Simple.Utils
 import Distribution.System
 import Distribution.Types.ComponentLocalBuildInfo
@@ -91,7 +92,6 @@ import Distribution.Version
 
 import Language.Haskell.Extension
 
-import Control.Monad
 import Data.Either (rights)
 import System.Directory (doesDirectoryExist, doesFileExist)
 import System.FilePath (isAbsolute, normalise)
@@ -225,7 +225,8 @@ haddock
   -> [PPSuffixHandler]
   -> HaddockFlags
   -> IO ()
-haddock = haddock_setupHooks noBuildHooks
+haddock pkg lbi suffixHandlers flags =
+  void $ haddock_setupHooks noBuildHooks pkg lbi suffixHandlers flags
 
 haddock_setupHooks
   :: BuildHooks
@@ -233,7 +234,7 @@ haddock_setupHooks
   -> LocalBuildInfo
   -> [PPSuffixHandler]
   -> HaddockFlags
-  -> IO ()
+  -> IO [MonitorFilePath]
 haddock_setupHooks
   _
   pkg_descr
@@ -244,11 +245,12 @@ haddock_setupHooks
         && not (fromFlag $ haddockExecutables haddockFlags)
         && not (fromFlag $ haddockTestSuites haddockFlags)
         && not (fromFlag $ haddockBenchmarks haddockFlags)
-        && not (fromFlag $ haddockForeignLibs haddockFlags) =
+        && not (fromFlag $ haddockForeignLibs haddockFlags) = do
         warn (fromFlag $ haddockVerbosity haddockFlags) $
           "No documentation was generated as this package does not contain "
             ++ "a library. Perhaps you want to use the --executables, --tests,"
             ++ " --benchmarks or --foreign-libraries flags."
+        return []
 haddock_setupHooks
   (BuildHooks{preBuildComponentRules = mbPbcRules})
   pkg_descr
@@ -329,22 +331,18 @@ haddock_setupHooks
     internalPackageDB <-
       createInternalPackageDB verbosity lbi (flag haddockDistPref)
 
-    (\f -> foldM_ f (installedPkgs lbi) targets') $ \index target -> do
+    (mons, _mbIPI) <- (\f -> foldM f ([], installedPkgs lbi) targets') $ \(monsAcc, index) target -> do
       let
         component = targetComponent target
         clbi = targetCLBI target
 
-        runPreBuildHooks :: LocalBuildInfo -> TargetInfo -> IO ()
-        runPreBuildHooks lbi2 tgt =
-          let inputs =
-                SetupHooks.PreBuildComponentInputs
-                  { SetupHooks.buildingWhat = BuildHaddock flags
-                  , SetupHooks.localBuildInfo = lbi2
-                  , SetupHooks.targetInfo = tgt
-                  }
-           in for_ mbPbcRules $ \pbcRules ->
-                SetupHooks.executeRules verbosity lbi target pbcRules inputs
-      preBuildComponent runPreBuildHooks verbosity lbi target
+        runPreBuildHooksHaddock :: IO [MonitorFilePath]
+        runPreBuildHooksHaddock =
+          case mbPbcRules of
+            Nothing -> return []
+            Just pbcRules ->
+              runPreBuildHooks (BuildHaddock flags) lbi target pbcRules
+      mons <- preBuildComponent runPreBuildHooksHaddock verbosity lbi target
 
       let
         lbi' =
@@ -464,12 +462,14 @@ haddock_setupHooks
         CTest _ -> when (flag haddockTestSuites) (smsg >> doExe component) >> return index
         CBench _ -> when (flag haddockBenchmarks) (smsg >> doExe component) >> return index
 
-      return ipi
+      return (monsAcc ++ mons, ipi)
 
     for_ (extraDocFiles pkg_descr) $ \fpath -> do
       files <- matchDirFileGlob verbosity (specVersion pkg_descr) mbWorkDir fpath
       for_ files $
         copyFileToCwd verbosity mbWorkDir (unDir $ argOutputDir commonArgs)
+
+    return mons
 
 -- | Execute 'Haddock' configured with 'HaddocksFlags'.  It is used to build
 -- index and contents for documentation of multiple packages.
@@ -1219,7 +1219,6 @@ hscolour'
       stylesheet = flagToMaybe $ hscolourCSS flags
       mbWorkDir = mbWorkDirLBI lbi
       i = interpretSymbolicPathLBI lbi -- See Note [Symbolic paths] in Distribution.Utils.Path
-
       go :: ConfiguredProgram -> IO ()
       go hscolourProg = do
         warn verbosity $
@@ -1232,18 +1231,13 @@ hscolour'
           i $ hscolourPref haddockTarget distPref pkg_descr
 
         withAllComponentsInBuildOrder pkg_descr lbi $ \comp clbi -> do
-          let tgt = TargetInfo clbi comp
-              runPreBuildHooks :: LocalBuildInfo -> TargetInfo -> IO ()
-              runPreBuildHooks lbi2 tgt =
-                let inputs =
-                      SetupHooks.PreBuildComponentInputs
-                        { SetupHooks.buildingWhat = BuildHscolour flags
-                        , SetupHooks.localBuildInfo = lbi2
-                        , SetupHooks.targetInfo = tgt
-                        }
-                 in for_ mbPbcRules $ \pbcRules ->
-                      SetupHooks.executeRules verbosity lbi tgt pbcRules inputs
-          preBuildComponent runPreBuildHooks verbosity lbi tgt
+          let
+            target = TargetInfo clbi comp
+            runPreBuildHooksHscolour :: IO ()
+            runPreBuildHooksHscolour =
+              for_ mbPbcRules $
+                void . runPreBuildHooks (BuildHscolour flags) lbi target
+          preBuildComponent runPreBuildHooksHscolour verbosity lbi target
           preprocessComponent pkg_descr comp lbi clbi False verbosity suffixes
           let
             doExe com = case (compToExe com) of

@@ -17,6 +17,7 @@ import qualified Distribution.Client.Setup as Client
 import Distribution.Client.SetupWrapper
   ( SetupScriptOptions (..)
   , defaultSetupScriptOptions
+  , SetupRunnerArgs(NotInLibrary)
   , setupWrapper
   )
 import Distribution.Simple.Command
@@ -80,6 +81,7 @@ wrapperAction command getCommonFlags =
         getCommonFlags
         (const flags)
         (const extraArgs)
+        NotInLibrary
 
 --
 

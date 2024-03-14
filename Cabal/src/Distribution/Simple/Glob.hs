@@ -62,7 +62,7 @@ import Distribution.Utils.Path
   , SymbolicPath
   , getSymbolicPath
   , unsafeMakeSymbolicPath
-  , FileOrDir(..)
+  , FileOrDir (..)
   )
 import Distribution.Verbosity
   ( Verbosity
