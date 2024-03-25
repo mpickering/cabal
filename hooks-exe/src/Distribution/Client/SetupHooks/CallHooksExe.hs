@@ -49,6 +49,7 @@ import System.FilePath
   ( (</>), (<.>) )
 
 import GHC.Stack
+import GHC.IO.Handle.FD
 
 type HookIO inputs outputs =
   ( HasCallStack
@@ -65,22 +66,29 @@ callHooksExe
   -> String   -- ^ name of the hook to run
   -> inputs   -- ^ argument to the hook
   -> IO outputs
-callHooksExe hooksExe hookName inputs =
-  P.withCreateProcess ((P.proc hooksExe [hookName]){P.std_in = P.CreatePipe, P.std_out = P.CreatePipe, P.std_err = P.Inherit}) $
+callHooksExe hooksExe hookName inputs = do
+  (fRead, fWrite) <- P.createPipeFd
+  hWrite <- fdToHandle fWrite
+  P.withCreateProcess ((P.proc hooksExe [show fWrite, hookName]){P.std_in = P.CreatePipe}) $
     \mb_std_in mb_std_out _ ph -> do
+      hClose hWrite
       let std_in = fromJust mb_std_in
-          std_out = fromJust mb_std_out
       -- fork off a thread to start consuming the output
-      putStrLn $ "I am doing " ++ hookName
-      output <- hGetContents std_out
+      putStrLn $ "I am doing2 " ++ hookName
+      putStrLn $ "I am converting handle"
+      hRead <- fdToHandle fRead
+      putStrLn $ "I am waiting"
+      output <- hGetContents hRead
       withForkWait (evaluate $ rnf output) $ \waitOut -> do
         -- now write any input
         ignoreSigPipe $ hPut std_in $ Binary.encode inputs
         -- hClose performs implicit hFlush, and thus may trigger a SIGPIPE
         ignoreSigPipe $ hClose std_in
+        putStrLn $ "Sent stdin"
         -- wait on the output
         waitOut
-        hClose std_out
+        putStrLn "got output"
+        hClose hRead
       ex <- P.waitForProcess ph
       putStrLn $ "I am done waiting on " ++ hookName
       case ex of

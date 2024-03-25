@@ -7,7 +7,7 @@ packages: cabal-install/
 packages: cabal-install-solver/
 packages: solver-benchmarks/
 packages: Cabal-hooks/
-packages: hooks-cli
+packages: hooks-exe
 
 tests: True
 
