@@ -103,6 +103,8 @@ data ConfigFlags = ConfigFlags
   -- ^ Enable vanilla library
   , configProfLib :: Flag Bool
   -- ^ Enable profiling in the library
+  , configProfLibOnly :: Flag Bool
+  -- ^ Only profiling
   , configSharedLib :: Flag Bool
   -- ^ Build shared library
   , configStaticLib :: Flag Bool
@@ -252,6 +254,7 @@ instance Eq ConfigFlags where
       && equal configHcPkg
       && equal configVanillaLib
       && equal configProfLib
+      && equal configProfLibOnly
       && equal configSharedLib
       && equal configStaticLib
       && equal configDynExe
@@ -314,6 +317,7 @@ defaultConfigFlags progDb =
     , configHcFlavor = maybe NoFlag Flag defaultCompilerFlavor
     , configVanillaLib = Flag True
     , configProfLib = NoFlag
+    , configProfLibOnly = NoFlag
     , configSharedLib = NoFlag
     , configStaticLib = NoFlag
     , configDynExe = Flag False
@@ -478,6 +482,13 @@ configureOptions showOrParseArgs =
           configProfLib
           (\v flags -> flags{configProfLib = v})
           (boolOpt "p" [])
+       , option
+           ""
+           ["library-profiling-only"]
+           "Library profiling only"
+           configProfLibOnly
+           (\v flags -> flags{configProfLibOnly = v})
+           (boolOpt [] [])
        , option
           ""
           ["shared"]

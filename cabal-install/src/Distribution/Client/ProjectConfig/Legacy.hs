@@ -698,6 +698,7 @@ convertLegacyPerPackageFlags
         , configProgramPathExtra = packageConfigProgramPathExtra
         , configVanillaLib = packageConfigVanillaLib
         , configProfLib = packageConfigProfLib
+        , configProfLibOnly = packageConfigProfLibOnly
         , configSharedLib = packageConfigSharedLib
         , configStaticLib = packageConfigStaticLib
         , configDynExe = packageConfigDynExe
@@ -992,6 +993,7 @@ convertToLegacyAllPackageConfig
           , configInstantiateWith = mempty
           , configVanillaLib = mempty
           , configProfLib = mempty
+          , configProfLibOnly = mempty
           , configSharedLib = mempty
           , configStaticLib = mempty
           , configDynExe = mempty
@@ -1069,6 +1071,7 @@ convertToLegacyPerPackageConfig PackageConfig{..} =
         , configInstantiateWith = mempty
         , configVanillaLib = packageConfigVanillaLib
         , configProfLib = packageConfigProfLib
+        , configProfLibOnly = packageConfigProfLibOnly
         , configSharedLib = packageConfigSharedLib
         , configStaticLib = packageConfigStaticLib
         , configDynExe = packageConfigDynExe
@@ -1479,6 +1482,8 @@ legacyPackageConfigFieldDescrs =
         , "program-suffix"
         , "library-vanilla"
         , "library-profiling"
+        , "library-profiling-only"
+        , "library-vanilla"
         , "shared"
         , "static"
         , "executable-dynamic"

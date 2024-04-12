@@ -670,6 +670,7 @@ computeLocalBuildConfig cfg comp programDb = do
             , withDynExe = withDynExe_
             , withFullyStaticExe = withFullyStaticExe_
             , withProfLib = False
+            , withProfLibOnly = False
             , withProfLibDetail = ProfDetailNone
             , withProfExe = False
             , withProfExeDetail = ProfDetailNone
@@ -1662,9 +1663,12 @@ configureProfiling verbosity cfg comp = do
       then do
         exeLevel <- checkProfileLevel tryExeProfileLevel
         libLevel <- checkProfileLevel tryLibProfileLevel
-        let apply buildOptions =
+        let tryLibProfOnly =
+              fromFlagOrDefault False (configProfLibOnly cfg)
+            apply buildOptions =
               buildOptions
                 { LBC.withProfLib = tryLibProfiling
+                , LBC.withProfLibOnly = tryLibProfOnly
                 , LBC.withProfLibDetail = libLevel
                 , LBC.withProfExe = tryExeProfiling
                 , LBC.withProfExeDetail = exeLevel
@@ -1674,6 +1678,7 @@ configureProfiling verbosity cfg comp = do
         let apply buildOptions =
               buildOptions
                 { LBC.withProfLib = False
+                , LBC.withProfLibOnly = False
                 , LBC.withProfLibDetail = ProfDetailNone
                 , LBC.withProfExe = False
                 , LBC.withProfExeDetail = ProfDetailNone

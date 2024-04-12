@@ -52,7 +52,7 @@ import System.FilePath
 -- -------------------------------------------------------------------------
 -- Haskell Program Coverage
 
-data Way = Vanilla | Prof | Dyn
+data Way = Vanilla | Prof | Dyn | ProfDyn
   deriving (Bounded, Enum, Eq, Read, Show)
 
 hpcDir
@@ -67,6 +67,7 @@ hpcDir distPref way = distPref </> "hpc" </> wayDir
       Vanilla -> "vanilla"
       Prof -> "prof"
       Dyn -> "dyn"
+      ProfDyn -> "prof_dyn"
 
 mixDir
   :: FilePath

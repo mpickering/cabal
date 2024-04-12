@@ -2198,6 +2198,7 @@ elaborateInstallPlan
                 , withGHCiLib = perPkgOptionFlag pkgid False packageConfigGHCiLib -- TODO: [required feature] needs to default to enabled on windows still
                 , withProfExe = perPkgOptionFlag pkgid False packageConfigProf
                 , withProfLib = pkgid `Set.member` pkgsUseProfilingLibrary
+                , withProfLibOnly = pkgid `Set.member` pkgsUseProfilingLibraryOnly
                 , exeCoverage = perPkgOptionFlag pkgid False packageConfigCoverage
                 , libCoverage = perPkgOptionFlag pkgid False packageConfigCoverage
                 , withOptimization = perPkgOptionFlag pkgid NormalOptimisation packageConfigOptimization
@@ -2388,6 +2389,18 @@ elaborateInstallPlan
               pkgid = packageId pkg
               profBothFlag = lookupPerPkgOption pkgid packageConfigProf
               profLibFlag = lookupPerPkgOption pkgid packageConfigProfLib
+
+      -- IWKIM
+      pkgsUseProfilingLibraryOnly :: Set PackageId
+      pkgsUseProfilingLibraryOnly =
+        packagesWithLibDepsDownwardClosedProperty needsProfilingLibOnly
+        where
+          needsProfilingLibOnly pkg =
+            fromFlagOrDefault False profLibOnlyFlag
+            where
+              pkgid = packageId pkg
+              profLibOnlyFlag = lookupPerPkgOption pkgid packageConfigProfLibOnly
+
       -- TODO: [code cleanup] unused: the old deprecated packageConfigProfExe
 
       libDepGraph =
@@ -3825,6 +3838,7 @@ setupHsConfigureFlags
         , configGHCiLib
         , -- , configProfExe -- overridden
         configProfLib
+        , configProfLibOnly
         , -- , configProf -- overridden
         configProfDetail
         , configProfLibDetail

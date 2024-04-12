@@ -186,6 +186,14 @@ buildExtraSources description componentSourceGhcOptions wantDyn viewSources ghcP
                   { ghcOptFPic = toFlag True
                   , ghcOptDynLinkMode = toFlag GhcDynamicOnly
                   }
+            profSharedSrcOpts =
+              vanillaSrcOpts
+                `mappend` mempty
+                  { ghcOptProfilingMode = toFlag True
+                  , ghcOptFPic = toFlag True
+                  , ghcOptDynLinkMode = toFlag GhcDynamicOnly
+                  , ghcOptObjSuffix = toFlag "p_dyn_o"
+                  }
             -- TODO: Placing all Haskell, C, & C++ objects in a single directory
             --       Has the potential for file collisions. In general we would
             --       consider this a user error. However, we should strive to
@@ -210,12 +218,16 @@ buildExtraSources description componentSourceGhcOptions wantDyn viewSources ghcP
                   compileIfNeeded vanillaSrcOpts
                   when (wantDyn && (forceSharedLib || withSharedLib lbi)) $
                     compileIfNeeded sharedSrcOpts{ghcOptObjSuffix = toFlag "dyn_o"}
-                  when (withProfLib lbi) $
+                  when (withProfLib lbi) $ do
                     compileIfNeeded profSrcOpts{ghcOptObjSuffix = toFlag "p_o"}
+                    when (wantDyn && (forceSharedLib || withSharedLib lbi)) $
+                      compileIfNeeded profSharedSrcOpts{ghcOptObjSuffix = toFlag "p_dyn_o"}
 
           -- For foreign libraries, we determine with which options to build the
           -- objects (vanilla vs shared vs profiled)
           CFLib flib
+            | withProfExe lbi && withDynFLib flib && wantDyn ->
+                compileIfNeeded profSharedSrcOpts
             | withProfExe lbi -> -- It doesn't sound right to query "ProfExe" for a foreign library...
                 compileIfNeeded profSrcOpts
             | withDynFLib flib && wantDyn ->
@@ -226,6 +238,8 @@ buildExtraSources description componentSourceGhcOptions wantDyn viewSources ghcP
           -- determine with which options to build the objects (vanilla vs shared vs
           -- profiled), but predicate is the same for the three kinds.
           _exeLike
+            | withProfExe lbi && withDynExe lbi && wantDyn ->
+                compileIfNeeded profSharedSrcOpts
             | withProfExe lbi ->
                 compileIfNeeded profSrcOpts
             | withDynExe lbi && wantDyn ->

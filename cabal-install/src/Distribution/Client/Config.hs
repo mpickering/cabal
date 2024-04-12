@@ -473,6 +473,7 @@ instance Semigroup SavedConfig where
           , configHcPkg = combine configHcPkg
           , configVanillaLib = combine configVanillaLib
           , configProfLib = combine configProfLib
+          , configProfLibOnly = combine configProfLibOnly
           , configProf = combine configProf
           , configSharedLib = combine configSharedLib
           , configStaticLib = combine configStaticLib

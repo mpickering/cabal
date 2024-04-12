@@ -107,7 +107,7 @@ build numJobs pkg_descr pbci = do
     wantVanilla = if isLib then withVanillaLib lbi else False
     -- Arguably, wantStatic should be "withFullyStaticExe lbi" for executables,
     -- but it was not before the refactor.
-    wantStatic = if isLib then withStaticLib lbi else not (wantDynamic || wantProf)
+    wantStatic = if isLib then withStaticLib lbi else not wantDynamic
     wantDynamic = case component of
       CLib{} -> withSharedLib lbi
       CFLib flib -> withDynFLib flib
@@ -115,16 +115,24 @@ build numJobs pkg_descr pbci = do
       CTest{} -> withDynExe lbi
       CBench{} -> withDynExe lbi
     wantProf = if isLib then withProfLib lbi else withProfExe lbi
+    wantProfOnly = if isLib then withProfLibOnly lbi else False
 
     -- See also Note [Building Haskell Modules accounting for TH] in Distribution.Simple.GHC.Build.Modules
     -- We build static by default if no other way is wanted.
     -- For executables and foreign libraries, there should only be one wanted way.
     wantedWays =
+     if wantProfOnly
+     then
+      Set.fromList $
+        [ProfDynWay | wantProf && wantDynamic]
+          <> [ProfWay | wantProf && (not wantDynamic || wantStatic || wantVanilla)]
+     else
       Set.fromList $
         -- If building a library, we accumulate all the ways,
         -- otherwise, we take just one.
         (if isLib then id else take 1) $
-          [ProfWay | wantProf]
+          [ProfDynWay | wantProf && wantDynamic]
+            <> [ProfWay | wantProf && (not wantDynamic || wantStatic || wantVanilla)]
             -- I don't see why we shouldn't build with dynamic
             -- indefinite components.
             <> [DynWay | wantDynamic && not (componentIsIndefinite clbi)]

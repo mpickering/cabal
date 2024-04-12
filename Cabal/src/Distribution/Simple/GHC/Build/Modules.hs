@@ -195,6 +195,18 @@ buildHaskellModules numJobs ghcProg pkg_descr buildTargetDir wantedWays pbci = d
               (if isLib then True else False)
               ((if isLib then withProfLibDetail else withProfExeDetail) lbi)
         }
+    profDynOpts =
+      (baseOpts ProfDynWay)
+        { ghcOptDynLinkMode = toFlag GhcDynamicOnly -- use -dynamic
+        , -- TODO: Does it hurt to set -fPIC for executables?
+          ghcOptFPic = toFlag True -- use -fPIC
+        , ghcOptProfilingMode = toFlag True
+        , ghcOptProfilingAuto =
+            Internal.profDetailLevelFlag
+              (if isLib then True else False)
+              ((if isLib then withProfLibDetail else withProfExeDetail) lbi)
+        }
+
     -- Options for building both static and dynamic way at the same time, using
     -- the GHC flag -static and -dynamic-too
     dynTooOpts =
@@ -207,14 +219,36 @@ buildHaskellModules numJobs ghcProg pkg_descr buildTargetDir wantedWays pbci = d
         -- (Note that `baseOtps StaticWay = hcStaticOptions`, not hcSharedOpts)
         }
 
+    profDynTooOpts =
+      (baseOpts ProfWay)
+        { ghcOptDynLinkMode = toFlag GhcStaticAndDynamic -- use -dynamic-too
+        , -- TODO: Does it hurt to set -fPIC for executables?
+          ghcOptFPic = toFlag True -- use -fPIC
+        , ghcOptProfilingMode = toFlag True
+        , ghcOptProfilingAuto =
+            Internal.profDetailLevelFlag
+              (if isLib then True else False)
+              ((if isLib then withProfLibDetail else withProfExeDetail) lbi)
+        , ghcOptDynHiSuffix = toFlag (buildWayPrefix ProfDynWay ++ "hi")
+        , ghcOptDynObjSuffix = toFlag (buildWayPrefix ProfDynWay ++ "o")
+        , ghcOptHPCDir = hpcdir Hpc.ProfDyn
+        -- Should we pass hcSharedOpts in the -dynamic-too ghc invocation?
+        -- (Note that `baseOtps StaticWay = hcStaticOptions`, not hcSharedOpts)
+        }
+
     -- Determines how to build for each way, also serves as the base options
     -- for loading modules in 'linkOrLoadComponent'
     buildOpts way = case way of
       StaticWay -> staticOpts
       DynWay -> dynOpts
       ProfWay -> profOpts
+      ProfDynWay -> profDynOpts
 
-    defaultGhcWay = if isDynamic comp then DynWay else StaticWay
+    -- IWKIM: TODO: we should get the compiler capability of profiling and dynamic.
+    defaultGhcWay
+      | ProfDynWay `Set.member` wantedWays = ProfDynWay
+      | isDynamic comp = DynWay
+      | otherwise = StaticWay
 
   -- If there aren't modules, or if we're loading the modules in repl, don't build.
   unless (forRepl || (null inputFiles && null inputModules)) $ liftIO $ do
@@ -235,17 +269,32 @@ buildHaskellModules numJobs ghcProg pkg_descr buildTargetDir wantedWays pbci = d
           && supportsDynamicToo comp
           && null (hcSharedOptions GHC bi)
 
+      useProfDynamicToo =
+        ProfWay `Set.member` neededWays
+          && ProfDynWay `Set.member` neededWays
+          && supportsDynamicToo comp
+          && null (hcSharedOptions GHC bi)
+
+      order w
+        | w == defaultGhcWay = 0
+        | otherwise = fromEnum w + 1
+
       -- The ways we'll build, in order
       orderedBuilds
         -- If we can use dynamic-too, do it first. The default GHC way can only
         -- be static or dynamic, so, if we build both right away, any modules
         -- possibly needed by TH later (e.g. if building profiled) are already built.
-        | useDynamicToo =
+        | useProfDynamicToo && useDynamicToo =
+            [buildProfAndProfDynamicToo, buildStaticAndDynamicToo]
+        | useProfDynamicToo && not useDynamicToo =
+            [buildProfAndProfDynamicToo]
+              ++ (runGhcProg . buildOpts <$> Set.toList neededWays \\ [ProfDynWay, ProfWay])
+        | useDynamicToo && not (ProfDynWay `Set.member` neededWays) =
             [buildStaticAndDynamicToo]
               ++ (runGhcProg . buildOpts <$> Set.toList neededWays \\ [StaticWay, DynWay])
         -- Otherwise, we need to ensure the defaultGhcWay is built first
         | otherwise =
-            runGhcProg . buildOpts <$> sortOn (\w -> if w == defaultGhcWay then 0 else fromEnum w + 1) (Set.toList neededWays)
+            runGhcProg . buildOpts <$> sortOn order (Set.toList neededWays)
 
       buildStaticAndDynamicToo = do
         runGhcProg dynTooOpts
@@ -259,12 +308,26 @@ buildHaskellModules numJobs ghcProg pkg_descr buildTargetDir wantedWays pbci = d
             -- both ways.
             copyDirectoryRecursive verbosity dynDir vanillaDir
           _ -> return ()
+
+      buildProfAndProfDynamicToo = do
+        runGhcProg profDynTooOpts
+        case (hpcdir Hpc.ProfDyn, hpcdir Hpc.Prof) of
+          (Flag profDynDir, Flag profDir) ->
+            -- When the vanilla and shared library builds are done
+            -- in one pass, only one set of HPC module interfaces
+            -- are generated. This set should suffice for both
+            -- static and dynamically linked executables. We copy
+            -- the modules interfaces so they are available under
+            -- both ways.
+            copyDirectoryRecursive verbosity profDynDir profDir
+          _ -> return ()
+
      in
       -- REVIEW:ADD? info verbosity "Building Haskell Sources..."
       sequence_ orderedBuilds
   return buildOpts
 
-data BuildWay = StaticWay | DynWay | ProfWay
+data BuildWay = StaticWay | DynWay | ProfWay | ProfDynWay
   deriving (Eq, Ord, Show, Enum)
 
 -- | Returns the object/interface extension prefix for the given build way (e.g. "dyn_" for 'DynWay')
@@ -273,6 +336,7 @@ buildWayPrefix = \case
   StaticWay -> ""
   ProfWay -> "p_"
   DynWay -> "dyn_"
+  ProfDynWay -> "p_dyn_"
 
 -- | Returns the corresponding 'Hpc.Way' for a 'BuildWay'
 buildWayHpcWay :: BuildWay -> Hpc.Way
@@ -280,6 +344,7 @@ buildWayHpcWay = \case
   StaticWay -> Hpc.Vanilla
   ProfWay -> Hpc.Prof
   DynWay -> Hpc.Dyn
+  ProfDynWay -> Hpc.Dyn
 
 -- | Returns a function to extract the extra haskell compiler options from a
 -- 'BuildInfo' and 'CompilerFlavor'
@@ -288,6 +353,7 @@ buildWayExtraHcOptions = \case
   StaticWay -> hcStaticOptions
   ProfWay -> hcProfOptions
   DynWay -> hcSharedOptions
+  ProfDynWay -> hcProfSharedOptions
 
 -- | Returns a pair of the Haskell input files and Haskell modules of the
 -- component being built.

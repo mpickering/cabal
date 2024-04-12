@@ -85,6 +85,15 @@ linkOrLoadComponent ghcProg pkg_descr extraSources (buildTargetDir, targetDir) (
   let
     extraSourcesObjs = map (`replaceExtension` objExtension) extraSources
 
+    buildOpts' way =
+      let old_opts = buildOpts way
+      in old_opts
+        { ghcOptInputFiles =
+            toNubListR
+              ([ buildTargetDir </> x |
+                x <- map (`replaceExtension` (buildWayPrefix way ++ objExtension)) extraSources
+               ]) <> ghcOptInputFiles old_opts
+        }
     -- TODO: Shouldn't we use withStaticLib for libraries and something else
     -- for foreign libs in the three cases where we use `withFullyStaticExe` below?
     linkerOpts rpaths =
@@ -111,10 +120,10 @@ linkOrLoadComponent ghcProg pkg_descr extraSources (buildTargetDir, targetDir) (
                 else cleanedExtraLibDirs
         , ghcOptLinkFrameworks = toNubListR $ PD.frameworks bi
         , ghcOptLinkFrameworkDirs = toNubListR $ PD.extraFrameworkDirs bi
-        , ghcOptInputFiles = toNubListR [buildTargetDir </> x | x <- extraSourcesObjs]
         , ghcOptNoLink = Flag False
         , ghcOptRPaths = rpaths
         }
+
   case what of
     BuildRepl replFlags -> liftIO $ do
       let
@@ -130,7 +139,7 @@ linkOrLoadComponent ghcProg pkg_descr extraSources (buildTargetDir, targetDir) (
                   (ghcOptExtra staticOpts)
                   <> replOptionsFlags (replReplOptions replFlags)
             , ghcOptInputModules = replNoLoad (replReplOptions replFlags) (ghcOptInputModules staticOpts)
-            , ghcOptInputFiles = replNoLoad (replReplOptions replFlags) (ghcOptInputFiles staticOpts)
+            , ghcOptInputFiles = replNoLoad (replReplOptions replFlags) (toNubListR [buildTargetDir </> x | x <- extraSourcesObjs])
             }
             -- For a normal compile we do separate invocations of ghc for
             -- compiling as for linking. But for repl we have to do just
@@ -164,10 +173,10 @@ linkOrLoadComponent ghcProg pkg_descr extraSources (buildTargetDir, targetDir) (
           rpaths <- if DynWay `Set.member` wantedWays then getRPaths pbci else return (toNubListR [])
           liftIO $ do
             info verbosity "Linking..."
-            let linkExeLike name = linkExecutable (linkerOpts rpaths) (wantedWays, buildOpts) targetDir name runGhcProg lbi
+            let linkExeLike name = linkExecutable (linkerOpts rpaths) (wantedWays, buildOpts') targetDir name runGhcProg lbi
             case component of
               CLib lib -> linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg lib lbi clbi extraSources rpaths wantedWays
-              CFLib flib -> linkFLib flib bi lbi (linkerOpts rpaths) (wantedWays, buildOpts) targetDir runGhcProg
+              CFLib flib -> linkFLib flib bi lbi (linkerOpts rpaths) (wantedWays, buildOpts') targetDir runGhcProg
               CExe exe -> linkExeLike (exeName exe)
               CTest test -> linkExeLike (testName test)
               CBench bench -> linkExeLike (benchmarkName bench)
@@ -207,6 +216,9 @@ linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg li
     sharedLibFilePath =
       buildTargetDir
         </> mkSharedLibName (hostPlatform lbi) compiler_id uid
+    profSharedLibFilePath =
+      buildTargetDir
+        </> mkProfSharedLibName (hostPlatform lbi) compiler_id uid
     staticLibFilePath =
       buildTargetDir
         </> mkStaticLibName (hostPlatform lbi) compiler_id uid
@@ -222,7 +234,9 @@ linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg li
     sharedLibInstallPath =
       libInstallPath
         </> mkSharedLibName (hostPlatform lbi) compiler_id uid
-
+    profSharedLibInstallPath =
+      libInstallPath
+        </> mkProfSharedLibName (hostPlatform lbi) compiler_id uid
     getObjFiles way =
       mconcat
         [ Internal.getHaskellObjects
@@ -312,6 +326,32 @@ linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg li
             toNubListR $ PD.extraFrameworkDirs libBi
         , ghcOptRPaths = rpaths
         }
+    ghcProfSharedLinkArgs pdynObjectFiles =
+      ghcBaseLinkArgs
+        { ghcOptShared = toFlag True
+        , ghcOptProfilingMode = toFlag True
+        , ghcOptProfilingAuto =
+            Internal.profDetailLevelFlag
+              True
+              (withProfLibDetail lbi)
+        , ghcOptDynLinkMode = toFlag GhcDynamicOnly
+        , ghcOptInputFiles = toNubListR pdynObjectFiles
+        , ghcOptOutputFile = toFlag profSharedLibFilePath
+        , -- For dynamic libs, Mac OS/X needs to know the install location
+          -- at build time. This only applies to GHC < 7.8 - see the
+          -- discussion in #1660.
+          ghcOptDylibName =
+            if hostOS == OSX
+              && ghcVersion < mkVersion [7, 8]
+              then toFlag profSharedLibInstallPath
+              else mempty
+        , ghcOptLinkLibs = extraLibs libBi
+        , ghcOptLinkLibPath = toNubListR $ cleanedExtraLibDirs
+        , ghcOptLinkFrameworks = toNubListR $ PD.frameworks libBi
+        , ghcOptLinkFrameworkDirs =
+            toNubListR $ PD.extraFrameworkDirs libBi
+        , ghcOptRPaths = rpaths
+        }
     ghcStaticLinkArgs staticObjectFiles =
       ghcBaseLinkArgs
         { ghcOptStaticLib = toFlag True
@@ -325,6 +365,7 @@ linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg li
   staticObjectFiles <- getObjFiles StaticWay
   profObjectFiles <- getObjFiles ProfWay
   dynamicObjectFiles <- getObjFiles DynWay
+  profDynamicObjectFiles <- getObjFiles ProfDynWay
 
   let
     linkWay = \case
@@ -338,6 +379,8 @@ linkLibrary buildTargetDir cleanedExtraLibDirs pkg_descr verbosity runGhcProg li
             ldProg
             ghciProfLibFilePath
             profObjectFiles
+      ProfDynWay -> do
+        runGhcProg $ ghcProfSharedLinkArgs profDynamicObjectFiles
       DynWay -> do
         runGhcProg $ ghcSharedLinkArgs dynamicObjectFiles
       StaticWay -> do

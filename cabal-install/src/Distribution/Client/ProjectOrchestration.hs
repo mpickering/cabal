@@ -1067,6 +1067,7 @@ printPlan
                 , configProfLib =
                     nubFlag tryLibProfiling (configProfLib fullConfigureFlags)
                     -- Maybe there are more we can add
+		, configProfLibOnly = configProfLibOnly fullConfigureFlags
                 }
          in -- Not necessary to "escape" it, it's just for user output
             unwords . ("" :) $

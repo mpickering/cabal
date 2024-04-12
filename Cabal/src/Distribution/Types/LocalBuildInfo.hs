@@ -27,6 +27,7 @@ module Distribution.Types.LocalBuildInfo
       , withPackageDB
       , withVanillaLib
       , withProfLib
+      , withProfLibOnly
       , withSharedLib
       , withStaticLib
       , withDynExe
@@ -163,6 +164,7 @@ pattern LocalBuildInfo
   -> Bool
   -> Bool
   -> Bool
+  -> Bool
   -> ProfDetailLevel
   -> ProfDetailLevel
   -> OptimisationLevel
@@ -195,6 +197,7 @@ pattern LocalBuildInfo
   , withPackageDB
   , withVanillaLib
   , withProfLib
+  , withProfLibOnly
   , withSharedLib
   , withStaticLib
   , withDynExe
@@ -246,6 +249,7 @@ pattern LocalBuildInfo
           LBC.BuildOptions
             { withVanillaLib
             , withProfLib
+            , withProfLibOnly
             , withSharedLib
             , withStaticLib
             , withDynExe
