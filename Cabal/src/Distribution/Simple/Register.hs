@@ -314,18 +314,12 @@ abiHash
 abiHash verbosity pkg distPref lbi lib clbi =
   case compilerFlavor comp of
     GHC -> do
-      fmap mkAbiHash $ GHC.libAbiHash verbosity pkg lbi' lib clbi
+      fmap mkAbiHash $ GHC.libAbiHash verbosity pkg lbi lib clbi
     GHCJS -> do
-      fmap mkAbiHash $ GHCJS.libAbiHash verbosity pkg lbi' lib clbi
+      fmap mkAbiHash $ GHCJS.libAbiHash verbosity pkg lbi lib clbi
     _ -> return (mkAbiHash "")
   where
     comp = compiler lbi
-    lbi' =
-      lbi
-        { withPackageDB =
-            withPackageDB lbi
-              ++ [SpecificPackageDB (internalPackageDBPath lbi distPref)]
-        }
 
 relocRegistrationInfo
   :: Verbosity
