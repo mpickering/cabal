@@ -130,6 +130,7 @@ import Distribution.System
 import qualified Data.Map as Map
 import Distribution.Compat.Graph (Graph)
 import qualified Distribution.Compat.Graph as Graph
+import Distribution.Version
 
 import qualified System.FilePath as FilePath (takeDirectory)
 
@@ -160,7 +161,7 @@ pattern LocalBuildInfo
   -> Maybe (SymbolicPath Pkg File)
   -> Graph ComponentLocalBuildInfo
   -> Map ComponentName [ComponentLocalBuildInfo]
-  -> Map (PackageName, ComponentName) ComponentId
+  -> Map (PackageName, ComponentName) (Version, ComponentId)
   -> InstalledPackageIndex
   -> PackageDescription
   -> ProgramDb

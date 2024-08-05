@@ -41,6 +41,7 @@ import Distribution.Simple.Program.Db (ProgramDb)
 import Distribution.Simple.Setup.Config
 import Distribution.System
 import Distribution.Utils.Path
+import Distribution.Version
 
 import Distribution.Compat.Graph (Graph)
 
@@ -101,7 +102,7 @@ data ComponentBuildDescr = ComponentBuildDescr
   -- ^ A map from component name to all matching
   -- components.  These coincide with 'componentGraph'
   -- There may be more than one matching component because of backpack instantiations
-  , promisedPkgs :: Map (PackageName, ComponentName) ComponentId
+  , promisedPkgs :: Map (PackageName, ComponentName) (Version, ComponentId)
   -- ^ The packages we were promised, but aren't already installed.
   -- MP: Perhaps this just needs to be a Set UnitId at this stage.
   , installedPkgs :: InstalledPackageIndex

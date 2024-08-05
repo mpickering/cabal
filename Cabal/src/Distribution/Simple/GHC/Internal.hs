@@ -672,7 +672,7 @@ getHaskellObjects _implInfo lib lbi clbi pref wanted_obj_ext allow_split_objs
 -- and is a hack to avoid passing bogus `-package` arguments to GHC. The assumption being that
 -- in 99% of cases we will include the right `-package` so that the C file finds the right headers.
 mkGhcOptPackages
-  :: Map (PackageName, ComponentName) ComponentId
+  :: Map (PackageName, ComponentName) (Version, ComponentId)
   -> ComponentLocalBuildInfo
   -> [(OpenUnitId, ModuleRenaming)]
 mkGhcOptPackages promisedPkgsMap clbi =
@@ -680,7 +680,7 @@ mkGhcOptPackages promisedPkgsMap clbi =
   ]
   where
     -- Promised deps are going to be simple UnitIds
-    promised_cids = Set.fromList (map newSimpleUnitId (Map.elems promisedPkgsMap))
+    promised_cids = Set.fromList (map (newSimpleUnitId . snd) (Map.elems promisedPkgsMap))
 
 substTopDir :: FilePath -> IPI.InstalledPackageInfo -> IPI.InstalledPackageInfo
 substTopDir topDir ipo =
