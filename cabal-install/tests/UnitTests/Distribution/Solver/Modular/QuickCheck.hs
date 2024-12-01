@@ -455,6 +455,8 @@ arbitraryComponentDep db = do
 -- | Location of an 'ExampleDependency'. It determines which values are valid.
 data ExDepLocation = SetupDep | NonSetupDep
 
+data ExDepPrivacy = ExDepPublic | ExDepPrivate
+
 arbitraryExDep :: TestDb -> ExDepLocation -> Gen ExampleDependency
 arbitraryExDep db@(TestDb pkgs) level =
   let flag =
@@ -462,21 +464,51 @@ arbitraryExDep db@(TestDb pkgs) level =
           <$> arbitraryFlagName
           <*> arbitraryDeps db
           <*> arbitraryDeps db
-      other =
+      unspecifiedVersion isPrivate =
         -- Package checks require dependencies on "base" to have bounds.
         let notBase = filter ((/= PN "base") . getName) pkgs
-         in [ExAny . unPN <$> elements (map getName notBase) | not (null notBase)]
-              ++ [
-                   -- existing version
-                   let fixed pkg = ExFix (unPN $ getName pkg) (unPV $ getVersion pkg)
-                    in fixed <$> elements pkgs
-                 , -- random version of an existing package
-                   ExFix . unPN . getName <$> elements pkgs <*> (unPV <$> arbitrary)
-                 ]
-   in oneof $
-        case level of
-          NonSetupDep -> flag : other
-          SetupDep -> other
+            pn = unPN <$> elements (map getName notBase)
+         in if null notBase
+              then Nothing
+              else Just $
+                case isPrivate of
+                  ExDepPublic -> ExAny <$> pn
+                  ExDepPrivate -> ExAnyPriv <$> arbitraryScopeName <*> pn
+      existingVersion isPrivate =
+        case isPrivate of
+          ExDepPublic -> do
+            pkg <- elements pkgs
+            return $ ExFix (unPN $ getName pkg) (unPV $ getVersion pkg)
+          ExDepPrivate -> do
+            pkg <- elements pkgs
+            sn <- arbitraryScopeName
+            return $ ExFixPriv sn (unPN $ getName pkg) (unPV $ getVersion pkg)
+      randomVersion isPrivate =
+        -- random version of an existing package
+        case isPrivate of
+          ExDepPublic ->
+            ExFix . unPN . getName
+              <$> elements pkgs
+              <*> (unPV <$> arbitrary)
+          ExDepPrivate ->
+            ExFixPriv
+              <$> arbitraryScopeName
+              <*> (unPN . getName <$> elements pkgs)
+              <*> (unPV <$> arbitrary)
+      exDep isPrivate =
+        maybeToList (unspecifiedVersion isPrivate)
+          ++ [existingVersion isPrivate, randomVersion isPrivate]
+      publicPrivateDepsRatio = 5
+   in case level of
+        NonSetupDep ->
+          frequency $
+            (publicPrivateDepsRatio, flag)
+              : [(1, d) | d <- exDep ExDepPrivate]
+              ++ [(publicPrivateDepsRatio, d) | d <- exDep ExDepPublic]
+        SetupDep -> oneof (exDep ExDepPublic)
+
+arbitraryScopeName :: Gen String
+arbitraryScopeName = elements [['S', x] | x <- ['1' .. '5']]
 
 arbitraryDeps :: TestDb -> Gen Dependencies
 arbitraryDeps db =
@@ -571,8 +603,11 @@ instance Arbitrary ExampleDependency where
   arbitrary = error "arbitrary not implemented: ExampleDependency"
 
   shrink (ExAny _) = []
+  shrink (ExAnyPriv _ pn) = [ExAny pn]
   shrink (ExFix "base" _) = [] -- preserve bounds on base
   shrink (ExFix pn _) = [ExAny pn]
+  shrink (ExFixPriv _ "base" v) = [ExFix "base" v] -- preserve bounds on base
+  shrink (ExFixPriv s pn v) = [ExAnyPriv s pn, ExFix pn v]
   shrink (ExFlagged flag th el) =
     depsExampleDependencies th
       ++ depsExampleDependencies el
