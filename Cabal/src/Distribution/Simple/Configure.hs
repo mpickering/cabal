@@ -342,6 +342,10 @@ writePersistBuildConfig mbWorkDir distPref lbi = do
   createDirectoryIfMissing False (i distPref)
   writeFileAtomic (i $ localBuildInfoFile distPref) $
     BLC8.unlines [showHeader pkgId, structuredEncode lbi]
+  mbLBIDir <- lookupEnv "LBI_DIR"
+  for_ mbLBIDir $ \ lbiDir ->
+    writeFile (lbiDir <> "/" <> prettyShow pkgId <> ".lbi") $
+      show lbi
   where
     i = interpretSymbolicPath mbWorkDir -- See Note [Symbolic paths] in Distribution.Utils.Path
     pkgId = localPackage lbi
